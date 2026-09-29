@@ -1,0 +1,16 @@
+{
+  "image_precision": 0.7150336574420344,
+  "image_recall": 0.9299610894941635,
+  "image_auc": 0.968928219805081,
+  "block_average_precision": 0.9297124800901759,
+  "images_with_victims": 1028,
+  "threshold": 0.5,
+  "modality": "cnn",
+  "channels": 4,
+  "train_images": 20000,
+  "test_images": 4000,
+  "epochs": 20,
+  "seconds": 2982.8,
+  "train_worlds": 200,
+  "views_per_world": 100
+}

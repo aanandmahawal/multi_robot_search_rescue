@@ -1,0 +1,11 @@
+# Installed by Streamlit Community Cloud (and by: pip install -r requirements.txt).
+# The CPU build of PyTorch is enough and far smaller than the default GPU build:
+--extra-index-url https://download.pytorch.org/whl/cpu
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+scikit-learn>=1.4
+pillow>=10.0
+torch>=2.2
+streamlit>=1.37
+pytest>=8.0

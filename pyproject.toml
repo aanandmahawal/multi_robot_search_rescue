@@ -1,0 +1,17 @@
+[project]
+name = "multi-robot-rescue"
+version = "0.1.0"
+description = "Multi-robot search-and-rescue simulation: autonomous exploration, CNN victim detection, cooperative task allocation, 3-D dashboard"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "matplotlib", "scikit-learn", "pillow", "torch"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+streamlit = ["streamlit>=1.37"]
+
+[tool.setuptools]
+packages = ["rescue"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

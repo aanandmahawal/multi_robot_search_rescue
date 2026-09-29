@@ -1,0 +1,13 @@
+# Streamlit settings for streamlit_app.py (locally and on Streamlit Community Cloud)
+[theme]
+base = "dark"
+backgroundColor = "#090d13"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

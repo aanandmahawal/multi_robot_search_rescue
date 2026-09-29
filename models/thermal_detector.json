@@ -1,0 +1,16 @@
+{
+  "image_precision": 0.8162808065720687,
+  "image_recall": 0.9837983798379838,
+  "image_auc": 0.9899441657561396,
+  "block_average_precision": 0.980035527125813,
+  "images_with_victims": 1111,
+  "threshold": 0.5,
+  "modality": "thermal",
+  "channels": 2,
+  "train_images": 20000,
+  "test_images": 4000,
+  "epochs": 20,
+  "seconds": 2958.4,
+  "train_worlds": 200,
+  "views_per_world": 100
+}

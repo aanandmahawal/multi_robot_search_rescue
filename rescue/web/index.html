@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RescueThermal AI · Mission Control</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ───────────── top bar: title, the four numbers that matter, panel switches ───────────── -->
+<header class="topbar">
+  <button class="icon-btn" id="toggleSetup" title="Show or hide the mission setup">⚙<span>Setup</span></button>
+  <div class="brand">
+    <b>RescueThermal AI</b>
+    <span>multi-robot search &amp; rescue</span>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><b id="k-time">0 s</b><span>mission time</span></div>
+    <div class="kpi" id="k-found-box" title="Locations the robots confirmed, checked against the truth: real victims and false alarms">
+      <b id="k-found">0</b><span id="k-found-sub">victims found</span><span class="warn" id="k-false" hidden></span></div>
+    <div class="kpi" id="k-searched-box"><b id="k-searched">0%</b><span id="k-searched-sub">searched by cameras</span><i class="bar"><i id="k-searched-bar" class="c-frontier"></i></i></div>
+    <div class="kpi"><b id="k-mapped">0%</b><span>mapped</span><i class="bar"><i id="k-mapped-bar" class="c-lidar"></i></i></div>
+  </div>
+  <button class="icon-btn" id="toggleDetails" title="Show or hide the details panel">☰<span>Details</span></button>
+</header>
+
+<main id="app">
+  <!-- ───────────── left: mission setup ───────────── -->
+  <aside class="panel left" id="setup">
+    <section class="group">
+      <h2>Disaster site</h2>
+      <div class="field">
+        <label for="building">Building</label>
+        <select id="building">
+          <option value="office">Office (open plan)</option>
+          <option value="apartments">Apartment block</option>
+          <option value="hospital">Hospital</option>
+          <option value="school">School</option>
+          <option value="parking">Parking garage</option>
+          <option value="warehouse" selected>Warehouse</option>
+        </select>
+        <button class="info" data-hint="hint-building" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-building"></p>
+      <div class="field">
+        <label for="damage">Damage</label>
+        <select id="damage">
+          <option value="light">Light</option>
+          <option value="moderate" selected>Moderate</option>
+          <option value="severe">Severe</option>
+        </select>
+        <button class="info" data-hint="hint-damage" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-damage"></p>
+      <div class="field">
+        <label for="density">Rubble</label>
+        <input type="range" id="density" min="0" max="3" step="0.25" value="1"><output id="densityOut">1×</output>
+        <button class="info" data-hint="hint-density" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-density"></p>
+      <button id="newBuilding" class="wide" title="Generate a different random building of this type">New random building</button>
+    </section>
+
+    <section class="group">
+      <h2>Victims</h2>
+      <div class="field">
+        <label>Number inside</label>
+        <div class="seg" id="knownSeg">
+          <button data-known="0" class="on">Unknown</button>
+          <button data-known="1">Known</button>
+        </div>
+        <button class="info" data-hint="hint-known" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-known"></p>
+      <div class="field" id="countRow" hidden>
+        <label for="victims">How many</label>
+        <input type="range" id="victims" min="1" max="16" value="8"><output id="victimsOut">8</output>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Robot team</h2>
+      <div class="field">
+        <label for="robots">Robots</label>
+        <input type="range" id="robots" min="1" max="8" value="4"><output id="robotsOut">4</output>
+      </div>
+      <div class="field">
+        <label for="strategy">Strategy</label>
+        <select id="strategy">
+          <option value="coordinated" selected>Coordinated (auction)</option>
+          <option value="partition">Partition (zones)</option>
+          <option value="greedy">Greedy (nearest)</option>
+          <option value="random">Random (baseline)</option>
+        </select>
+        <button class="info" data-hint="hint-strategy" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-strategy"></p>
+      <div class="field">
+        <label>Runs</label>
+        <div class="seg" id="varySeg">
+          <button data-vary="0" class="on">Repeat</button>
+          <button data-vary="1">Vary</button>
+        </div>
+        <button class="info" data-hint="hint-vary" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-vary"></p>
+    </section>
+
+    <section class="group">
+      <h2>Navigation</h2>
+      <div class="field">
+        <label for="planner">Path planner</label>
+        <select id="planner">
+          <option value="dijkstra" selected>Dijkstra</option>
+          <option value="astar">A* (A-star)</option>
+          <option value="rrtstar">RRT* (random tree)</option>
+          <option value="aco">Ant colony (ACO)</option>
+        </select>
+        <button class="info" data-hint="hint-planner" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-planner"></p>
+      <div class="field">
+        <label for="coverage">Coverage</label>
+        <select id="coverage">
+          <option value="frontier" selected>Frontier-based</option>
+          <option value="boustrophedon">Lawnmower (boustrophedon)</option>
+          <option value="spiral">Spiral (outside in)</option>
+        </select>
+        <button class="info" data-hint="hint-coverage" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-coverage"></p>
+      <div class="field">
+        <label for="avoidance">Obstacles</label>
+        <select id="avoidance">
+          <option value="none" selected>Follow route</option>
+          <option value="dwa">DWA (dynamic window)</option>
+        </select>
+        <button class="info" data-hint="hint-avoidance" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-avoidance"></p>
+      <div class="field">
+        <label>Revisits</label>
+        <div class="seg" id="revisitSeg">
+          <button data-revisit="0" class="on">Allowed</button>
+          <button data-revisit="0.3">Avoid</button>
+        </div>
+        <button class="info" data-hint="hint-revisit" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-revisit"></p>
+      <div class="field">
+        <label>Dead ends</label>
+        <div class="seg" id="deadendSeg">
+          <button data-deadend="1" class="on">Recover</button>
+          <button data-deadend="0">Off</button>
+        </div>
+        <button class="info" data-hint="hint-deadend" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-deadend"></p>
+      <div class="field">
+        <label for="rspeed">Speed</label>
+        <input type="range" id="rspeed" min="0.2" max="1.5" step="0.1" value="0.5"><output id="rspeedOut">0.5</output><small>m/s</small>
+        <button class="info" data-hint="hint-speed" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-speed"></p>
+      <div class="field">
+        <label for="battery">Battery</label>
+        <select id="battery">
+          <option value="0" selected>Unlimited</option>
+          <option value="50">50 Wh</option>
+          <option value="20">20 Wh</option>
+          <option value="10">10 Wh</option>
+          <option value="5">5 Wh</option>
+          <option value="3">3 Wh</option>
+        </select>
+        <button class="info" data-hint="hint-battery" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-battery"></p>
+    </section>
+
+    <section class="group">
+      <h2>Sensors on the robots</h2>
+      <div class="options" id="sensorOptions"></div>
+      <div class="field" style="margin-top:10px">
+        <label for="camrange">Camera range</label>
+        <input type="range" id="camrange" min="2" max="8" step="0.5" value="5"><output id="camrangeOut">5</output>
+        <button class="info" data-hint="hint-ranges" title="What is this?">i</button>
+      </div>
+      <div class="field">
+        <label for="lidarrange">LiDAR range</label>
+        <input type="range" id="lidarrange" min="3" max="20" step="1" value="8"><output id="lidarrangeOut">8</output>
+      </div>
+      <p class="hint" id="hint-ranges"></p>
+    </section>
+
+    <section class="group limits">
+      <h2>What the sensors cannot do</h2>
+      <ul>
+        <li><b>Cameras</b> (thermal or colour) cannot see a person buried under thick rubble: no heat reaches the surface.</li>
+        <li><b>LiDAR</b> sees nothing lower than its scan plane (40 cm) and cannot tell a person from a box.</li>
+      </ul>
+    </section>
+    <p class="fine">Changing the building or the damage creates a new building. Every other change restarts the mission in the <b>same</b> building, so you can compare fairly. The mission waits for <b>Start</b>.</p>
+  </aside>
+
+  <!-- ───────────── centre: the 3-D view with its controls ───────────── -->
+  <section id="view" class="look-combined">
+    <div class="toast" id="error" hidden></div>
+    <div class="hud-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+    <div class="viewui">
+      <!-- top row: which picture of the building (left), how the camera looks at it (right) -->
+      <div class="viewtop">
+        <div class="picture" role="group" aria-label="Show the building as">
+          <span class="lbl">Show as</span>
+          <div class="pics" id="viewAsSeg"></div>
+        </div>
+        <div class="camtools">
+          <div class="seg" id="viewSeg">
+            <button data-view="overview" class="on" title="The whole building from above at an angle">⌂<span> Overview</span></button>
+            <button data-view="top" title="Straight down, like a floor plan">▦<span> Top-down</span></button>
+            <button data-view="follow" title="Ride behind the selected robot">◎<span> Follow robot</span></button>
+          </div>
+          <div class="pop-wrap">
+            <button id="layersBtn" title="Choose what is drawn">☰<span> Layers</span> ▾</button>
+            <div class="popover" id="layers" hidden></div>
+          </div>
+          <button id="legendBtn" title="Show or hide the colour key">◧<span> Legend</span></button>
+        </div>
+      </div>
+      <div class="banner" id="banner" hidden></div>
+      <!-- one line on what the picture shows, and the colour key -->
+      <div class="viewinfo">
+        <p id="viewAsHelp"></p>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+
+    <!-- instrument read-out for the sensor pictures -->
+    <div class="hud" id="hud" hidden></div>
+
+    <!-- bottom left: the selected spot, and how to use the mouse -->
+    <div class="bl">
+      <div class="inspector" id="inspector" hidden>
+        <div class="ihead">
+          <div><b id="inspTitle"></b><span id="inspSub"></span></div>
+          <button class="close" id="inspClose" title="Clear the selection (Esc)">✕</button>
+        </div>
+        <p id="inspNote"></p>
+        <div id="inspRows"></div>
+        <div class="iacts">
+          <button id="inspCenter" title="Fly back to the selected spot (F)">⌖ Centre on it</button>
+          <button id="inspFollow" title="Ride behind this robot">◎ Follow this robot</button>
+        </div>
+        <p class="ihint">Scroll to zoom around this spot · drag to orbit it · Esc to clear</p>
+      </div>
+      <div class="navhelp" id="navHelp">
+        <span><kbd>Drag</kbd> rotate</span><span><kbd>Right-drag</kbd> move</span><span><kbd>Scroll</kbd> zoom</span>
+        <span><kbd>Double-click</kbd> select &amp; zoom there</span>
+        <button class="close" id="navHelpClose" title="Hide these tips">✕</button>
+      </div>
+    </div>
+
+    <!-- bottom right: zoom -->
+    <div class="zoomstack" role="group" aria-label="Zoom">
+      <button id="zoomIn" title="Zoom in (+)">+</button>
+      <button id="zoomOut" title="Zoom out (−)">−</button>
+      <button id="zoomFit" title="Show the whole building (F)">⤢</button>
+      <button id="navHelpBtn" title="Mouse and keyboard tips">?</button>
+    </div>
+
+    <div class="callout" id="callout" hidden>The robots wait at the entrance and know nothing about the building. Press <b>Start</b> to send them in.</div>
+    <div class="transport" id="transport">
+      <span class="status" id="status"><i></i><span id="statusText">Loading</span></span>
+      <button id="play" class="primary big" title="Space">▶ Start</button>
+      <button id="stepBtn" title="Advance one second ( . )">+1 s</button>
+      <div class="seg speed" id="speedSeg" title="Simulated seconds per real second"></div>
+      <button id="restart" title="Same building, back to the start">↻ Restart</button>
+    </div>
+  </section>
+
+  <!-- ───────────── right: details, one tab at a time ───────────── -->
+  <aside class="panel right" id="details">
+    <nav class="tabs" id="tabs">
+      <button data-tab="victims" class="on">Victims<em id="badge-victims"></em></button>
+      <button data-tab="robots">Robots</button>
+      <button data-tab="sensors">Sensors</button>
+      <button data-tab="map">Map</button>
+      <button data-tab="stats">Stats</button>
+      <button data-tab="log">Log</button>
+    </nav>
+
+    <div class="tab" id="tab-victims">
+      <h3 id="victimTitle">Victims</h3>
+      <p class="fine" id="victimNote"></p>
+      <div class="sum" id="reportSum"></div>
+      <p class="fine" id="repeatNote" hidden></p>
+      <div class="list" id="victimList"></div>
+      <h3 id="falseTitle" hidden>False alarms</h3>
+      <p class="fine" id="falseNote" hidden>The robots confirmed a person at these places, but nobody is there. The robots cannot know that; the simulator does.</p>
+      <div class="list" id="falseList"></div>
+    </div>
+
+    <div class="tab" id="tab-robots" hidden>
+      <h3>Why each robot goes where</h3>
+      <p class="fine">Click a robot to select it for the Sensors tab and the Follow view.</p>
+      <div class="list" id="robotList"></div>
+    </div>
+
+    <div class="tab" id="tab-sensors" hidden>
+      <div class="chips" id="robotChips"></div>
+      <div id="camSection">
+        <h3>Thermal camera <small>temperature of what the robot looks at</small></h3>
+        <img id="camThermal" class="cam" alt="thermal camera image">
+        <p class="fine" id="thermalInfo"></p>
+        <h3>Colour camera <small>lit only by the robot's headlamp</small></h3>
+        <img id="camColour" class="cam" alt="colour camera image">
+        <p class="fine" id="camInfo"></p>
+      </div>
+      <p class="note" id="noCamera" hidden>These robots carry no camera. Choose <b>Combined</b> or <b>Vision + Thermal</b> under <i>Sensors on the robots</i> to see camera images.</p>
+      <div id="lidarSection">
+        <h3>LiDAR <small>one turn of the laser, robot facing up</small></h3>
+        <canvas id="lidarPlot"></canvas>
+        <p class="fine" id="lidarInfo"></p>
+      </div>
+      <p class="note" id="noLidar" hidden>These robots carry no LiDAR. Choose <b>Combined</b> or <b>LiDAR</b> under <i>Sensors on the robots</i> to see laser scans.</p>
+    </div>
+
+    <div class="tab" id="tab-map" hidden>
+      <h3>Victim map <small>what the team would hand to rescuers</small></h3>
+      <canvas id="vmap"></canvas>
+      <div class="keys" id="vmapKeys"></div>
+      <p class="fine" id="vmapNote"></p>
+      <button id="exportMap" class="wide">⬇ Export victim map (JSON)</button>
+    </div>
+
+    <div class="tab" id="tab-stats" hidden>
+      <h3>Performance</h3>
+      <div class="metrics" id="metrics"></div>
+      <h3>Progress over time</h3>
+      <canvas id="chart"></canvas>
+      <h3>Compare algorithms <small>same building, same random choices</small></h3>
+      <p class="fine">Runs this mission to the end once per option, side by side in the background. The best value in each column is highlighted.</p>
+      <div class="field cmp-row">
+        <select id="cmpDim">
+          <option value="planner">Path planners</option>
+          <option value="coverage">Coverage patterns</option>
+          <option value="avoidance">Obstacle avoidance</option>
+          <option value="strategy">Team strategies</option>
+        </select>
+        <label class="chk" title="Perfect-eyes vision: the same navigation, about 6 times faster. Untick to use the AI on the cameras."><input type="checkbox" id="cmpFast" checked>fast</label>
+        <button id="cmpRun" class="primary">Run</button>
+      </div>
+      <div id="cmpOut"></div>
+    </div>
+
+    <div class="tab" id="tab-log" hidden>
+      <h3>Mission log</h3>
+      <div id="log"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+  // show script errors on the page instead of failing silently
+  function showPageError(msg) { const el = document.getElementById("error"); el.hidden = false; el.textContent = msg; }
+  window.addEventListener("error", e => showPageError("Script error: " + e.message));
+  window.addEventListener("unhandledrejection", e => showPageError("Error: " + (e.reason && e.reason.message || e.reason)));
+</script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/" } }
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
