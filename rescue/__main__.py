@@ -164,7 +164,7 @@ def main(argv=None):
     import sys
     if hasattr(sys.stdout, "reconfigure"):          # log lines contain "°C"; never crash on a narrow console encoding
         sys.stdout.reconfigure(errors="replace")
-    p = argparse.ArgumentParser(prog="rescue", description="RescueThermal AI: multi-robot search-and-rescue simulator")
+    p = argparse.ArgumentParser(prog="rescue", description="RescueSim: multi-robot search-and-rescue simulator (LiDAR, RGB-D, thermal)")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = RescueConfig()
 
