@@ -1,14 +1,16 @@
-# 🚨 RescueThermal AI
+# 🚨 RescueSim: Multi-Robot Search & Rescue Simulator
 
-A team of autonomous robots searches an unknown, damaged building for survivors. Each robot carries a **LiDAR**, a
-**colour + depth camera** and a **thermal camera**. The robots map the building, search it with their cameras, recognise
-people with a small neural network, share what they find, split the work between them, and report a map of victims to the
-rescue team. Every mission is scored against the hidden ground truth.
+**LiDAR · RGB-D camera · thermal imaging · CNN victim detection · multi-robot coordination**
 
-![dashboard](docs/guide/img/dashboard_now.png)
+RescueSim is a simulator in which a team of autonomous ground robots searches an unknown, damaged building for survivors.
+Each robot carries a **LiDAR**, a **colour + depth (RGB-D) camera** and a **thermal camera**. The robots map the building,
+search it with their cameras, recognise people with a small neural network, share what they find, split the work between
+them, and report a map of victims to the rescue team. Every mission is scored against the hidden ground truth.
 
-📘 **Full explanation:** [docs/RescueThermal_AI_Guide.pdf](docs/RescueThermal_AI_Guide.pdf) is a 63-page guide to every
-algorithm, sensor model and design decision, with diagrams and interview questions.
+![RescueSim dashboard](docs/guide/img/dashboard_now.png)
+
+📘 **Full explanation:** [docs/RescueSim_Guide.pdf](docs/RescueSim_Guide.pdf) is a 63-page guide to every algorithm,
+sensor model and design decision, with diagrams and interview questions.
 
 ## Features
 
