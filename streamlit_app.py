@@ -1,4 +1,4 @@
-"""RescueThermal AI on Streamlit.
+"""RescueSim (multi-robot search & rescue simulator) on Streamlit.
 
     streamlit run streamlit_app.py
 
@@ -25,7 +25,7 @@ from rescue.server import MAX_STEPS, Compare, Session, _cfg_from, _clean
 WEB = Path(__file__).parent / "rescue" / "web"
 BASE = RescueConfig()
 
-st.set_page_config(page_title="RescueThermal AI · Mission Control", page_icon="🚨", layout="wide",
+st.set_page_config(page_title="RescueSim · Multi-Robot Search & Rescue Simulator", page_icon="🚨", layout="wide",
                    initial_sidebar_state="collapsed")
 # the dashboard has its own layout: give it the whole window
 st.markdown("""<style>
