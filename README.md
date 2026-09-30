@@ -131,8 +131,8 @@ the thermal cameras.
 
 ### Mission setup (left)
 
-1. **Disaster site.** One of six **building types** and a **damage level** (light / moderate /
-   severe). Changing either creates a new random building of that kind; *New random building*
+1. **Disaster site.** One of six **building types**, or the **open test ground** for checking the
+   algorithms, and a **damage level** (light / moderate / severe). Changing either creates a new random building of that kind; *New random building*
    gives another layout. The damage level also decides how many victims are partly buried, fully
    covered by thin debris, or **buried under thick rubble (undetectable)**.
 2. **Victims.** *Unknown* is the usual real-life case: you only see victims once the robots
@@ -146,7 +146,8 @@ the thermal cameras.
 4. **Navigation** (section 9a): **path planner** (Dijkstra, A*, RRT*, ant colony), **coverage**
    pattern (frontier, lawnmower, spiral), **obstacles** (follow the route, or Dynamic Window
    Approach), **revisits** (allowed, or avoid ground already driven over), **dead ends**
-   (recover or not), **speed** (0.2–1.5 m/s) and **battery** (unlimited or 3–50 Wh). The
+   (recover or not), **speed** (0.2–1.5 m/s) and **battery** (unlimited, 1–10 Wh, or a different
+   battery per robot; with a battery, **at base**: recharge and go back out, or stay). The
    *Disaster site* section also has a **rubble** slider (obstacle density, 0–3×).
 5. **Sensors on the robots.** One choice, plus the **camera range** (2–8 m) and **LiDAR range**
    (3–20 m):
@@ -163,7 +164,8 @@ mission **in the same building**, so you can compare fairly. A setup can also be
 address bar, e.g.
 `http://localhost:8001/?building=parking&damage=severe&sensors=cameras&show=thermal&known=1&seed=42`.
 Navigation settings work the same way: `planner=astar|rrtstar|aco`, `coverage=boustrophedon|spiral`,
-`avoidance=dwa`, `revisit=0.3`, `deadend=0`, `rspeed=0.8` (m/s), `battery=10` (Wh), `camrange=6`,
+`avoidance=dwa`, `revisit=0.3`, `deadend=0`, `rspeed=0.8` (m/s), `battery=2` (Wh), `battery_each=1,2,3,0`
+(Wh per robot, 0 = unlimited), `recharge=0`, `camrange=6`,
 `lidarrange=12`, `density=2`, `vary=1`.
 
 ### What you see in 3-D
@@ -175,6 +177,7 @@ Navigation settings work the same way: `planner=astar|rrtstar|aco`, `coverage=bo
 | 🟧 **amber flag "V3 ?"** (known count only) | a robot **spotted something** there and the team is checking |
 | 🟪 **purple flag "V3 ⛏"** over a rubble mound (known count or after *Reveal*) | a victim **buried under thick rubble**: no heat signature, **no camera can detect this person** |
 | red ring with **"✕ false alarm"** | the robots **confirmed** a person here, but nobody is there (a dog, a heater, a jacket...) |
+| amber ring with **"⧉ counted twice"** | a real person the robots had already counted, confirmed again further than 1.6 m from the first report |
 | amber **"? 62 % · 33°C"** marker | what the robots *believe*: an unconfirmed sighting, how sure they are, and the temperature they measured |
 | grey **"✕ rejected"** | a sighting the robots checked and rejected |
 | **ring of light dots around a robot** with faint beams | its latest **LiDAR scan**: where the laser beams ended |
@@ -228,12 +231,14 @@ Only the open tab is redrawn while the mission runs, which keeps the page light.
 The same three numbers appear in the top bar, the Victims tab, the map and the mission summary:
 
 ```
-confirmed by the robots  =  real victims  +  false alarms
+confirmed by the robots  =  real victims  +  false alarms  +  people counted twice
 ```
 
 * A **real victim** is a confirmed report within 1.5 m of a person. One report counts one person.
 * A **false alarm** is a confirmed report with nobody there. The robots cannot know this; the
   simulator does, and the dashboard marks it in red so that it is never mistaken for a victim.
+* A person **counted twice** is a real person confirmed a second time, more than 1.6 m from the
+  first report. It is marked in amber ("⧉ counted twice"): it is an error in the count, not a phantom.
 * **Repeated reports are merged.** A lying body is 1.75 m long, and its head and legs can look
   like two separate warm shapes. Confirmed sightings closer than 1.6 m are therefore one person,
   in the robots' own count as well as in the score. The Victims tab says how many were merged.
@@ -276,6 +281,7 @@ That is what makes them *autonomous*. (`rescue/simulator.py`, `Simulator.step`)
 | **School** | classrooms along a corridor, and a large gym | rows of school desks and chairs, teacher's desk, bookshelves, bleachers, court lines | 19 °C |
 | **Parking garage** | two rows of painted bays, a wide driving lane, pillars, a stairwell | parked cars (they block the camera's view; some have **warm engines**) | 13 °C |
 | **Warehouse** | offices along the top, a big hall | pillars and tall pallet racks full of cartons | 15 °C |
+| **Open test ground** (*plain*) | one empty hall, the same every time: made for checking the coverage patterns and route planners (section 9a) | a 2 × 2 m block in the middle, two crates, cabinets in the four corners, shelves and counters along the walls; no rubble, no look-alikes, no warm objects | 20 °C |
 
 | | | |
 |---|---|---|
@@ -514,8 +520,9 @@ simply be added up.
 * Each **close look that sees nobody** adds **−0.9**.
 * Detections within 1.3 m of each other are treated as the same person.
 
-A candidate is **CONFIRMED** only when all three hold: evidence **≥ 6.0**, seen in **≥ 4
-separate camera frames**, and **at least one close look (≤ 2.5 m)**. It is **REJECTED** when
+A detection counts when the network's heatmap reaches **0.92**. A candidate is **CONFIRMED** only
+when all three hold: evidence **≥ 9.0**, seen in **≥ 6 separate camera frames**, and **at least
+one close look (≤ 2.5 m)**. It is **REJECTED** when
 evidence falls to **−1.5**. An inconclusive close look is retried **from a different side** (a buried
 person may be visible from one angle only), up to 4 times.
 
@@ -528,15 +535,62 @@ the expected count when the number of victims is known.
 
 | time | event | evidence | status |
 |---|---|---|---|
-| 12 s | R2's thermal camera picks up a 31 °C signature 4.6 m away, confidence 0.88 | −0.6 + 0.55 × 2.0 = **0.5** | candidate ("? 62 % · 31°C") |
-| 13 s | R2 again from 4.2 m, 0.91 | 0.5 + 1.3 = **1.8** | candidate |
+| 12 s | R2's thermal camera picks up a 31 °C signature 4.6 m away, confidence 0.93 | −0.6 + 0.55 × 2.59 = **0.8** | candidate ("? 69 % · 31°C") |
+| 13 s | R2 again from 4.2 m, 0.94 | 0.8 + 0.55 × 2.75 = **2.3** | candidate |
 | 13 s | R1 is sent to take a closer look | | |
-| 19 s | R1 at 1.4 m: 0.96, 34 °C | 1.8 + 3.2 = **5.0** | candidate |
-| 20 s | R1 again: 0.95 | 5.0 + 2.9 = **7.9**, 4 frames, close look | **CONFIRMED** (green flag) |
+| 19 s | R1 at 1.4 m: 0.96, 34 °C | 2.3 + 3.2 = **5.5** | candidate |
+| 20 s | R1 again: 0.95 | 5.5 + 2.9 = **8.4**, 4 frames | candidate (needs 9.0 and 6 frames) |
+| 21 s | R1 from another angle: 0.96 | 8.4 + 3.2 = **11.6**, 5 frames | candidate |
+| 22 s | R1 again: 0.95 | 11.6 + 2.9 = **14.5**, 6 frames, close look | **CONFIRMED** (green flag) |
 
-**A jacket** (colour camera): seen once from far away at 0.87 (evidence 0.5), then close looks where
-the network no longer fires (−0.9 each) → −0.4 → −1.3 → −2.2 → **REJECTED** (grey ✕). With the
+**A jacket** (colour camera): seen once from far away at 0.93 (evidence 0.8), then close looks where
+the network no longer fires (−0.9 each) → −0.1 → −1.0 → −1.9 → **REJECTED** (grey ✕). With the
 thermal or fusion detector the jacket is cold and usually never becomes a candidate at all.
+
+**One verdict for the whole team.** Evidence is a plain sum, so the order of the reports does not
+matter. The verdict is only taken once per second, after the robots have exchanged their reports,
+and every robot applies new reports in the same order (by report id). Robots that hold the same
+reports therefore always hold the same verdict. Before this, a robot applied its own reports at once
+and its teammates' later, and a confirmation ignored every "nobody here" report that came after
+it. So two robots with the same evidence could disagree: in 6 test missions, one robot rejected
+a spot that another had confirmed 7 times. Now it is 0 (checked every second in
+`tests/test_rescue.py` and `scripts/reliability.py`). A confirmation is final, because it has been
+passed on to the rescuers. A rejection is not: new, stronger sightings can reopen it.
+
+### 7.4 How reliable is it? (measured against the ground truth)
+
+`python scripts/reliability.py` runs 12 missions per sensor set (the six damaged buildings, two
+seeds, 4 robots, 10 victims, 12 look-alikes, 6 warm objects each). It classifies every place the
+team confirmed as a person, and every sighting it rejected, by what is really there
+(`results/reliability/report.md`). The confirmation rule above was chosen this way. The table
+below compares it with the previous rule (0.85 / 6.0 / 4 frames) on 12 *other* missions per sensor
+set (seeds 400–401) that it was not tuned on:
+
+| Sensors | Rule | Real victims confirmed (of 108) | False alarms (nobody there) | A person counted twice | Precision |
+|---|---|---|---|---|---|
+| Colour + thermal fused | previous | 107 | 30 | 5 | 75 % |
+| Colour + thermal fused | **current** | 105 | 13 | 0 | **89 %** |
+| Thermal camera only | previous | 105 | 34 | 3 | 74 % |
+| Thermal camera only | **current** | 104 | 25 | 2 | **79 %** |
+| Colour camera only | previous | 94 | 54 | 2 | 63 % |
+| Colour camera only | **current** | 91 | 21 | 0 | **81 %** |
+
+What this means in plain words:
+
+* **Almost everyone who can be seen is found.** With both cameras the team confirmed 105 of 108
+  people. Nearly every victim it never finds lies under thick rubble, where no camera can see
+  anything (those are not counted among the 108).
+* **About 1 confirmed "person" in 9 is not a person** (fused cameras). The usual culprits are a
+  **dog** or **sun-warmed rubble**. These are 28–36 °C, the same as human skin, and a lying dog has
+  a warm, body-like shape, so a thermal AI cannot always tell them apart. Real rescue robots have
+  exactly this problem. It is not a flaw in the simulation: it is why every confirmation here
+  carries a ground-truth label, and why a human checks each one.
+* **The stricter rule costs 1–3 confirmations per 108** in exchange for halving the false alarms.
+  Those people are not lost: their sightings stay on the victim map as "possible victim here,
+  unconfirmed", which rescuers see. The rule lives in three settings in `rescue/config.py`
+  (`detect_threshold`, `confirm_logodds`, `confirm_frames`) if you prefer the other balance.
+* **"Counted twice"** is a real person reported a second time, more than 1.6 m from the first report
+  (head and legs of one body). The dashboard labels it "⧉ counted twice", not "false alarm".
 
 ---
 
@@ -657,9 +711,26 @@ this, every step took exactly one second whatever its length or angle.)
 **Energy** of a 25 kg robot: all the time it works, P_base = computer 15 W + LiDAR 8 W + cameras
 6 W; driving costs rolling resistance through the drivetrain, *m g C_rr / η* = 25 × 9.81 × 0.05 / 0.6
 = **20 J per metre**, plus motor losses *k v²* (k = 12 W s²/m²); turning on the spot scrubs the
-tracks, *m g μ (b/2) |Δθ| / η*. With a **battery**, a robot heads home as soon as what is left is no
-more than 1.3 × the energy of the drive back plus a 5 % reserve, and that decision sticks: it never
-leaves base again. At 0 J it stops where it is.
+tracks, *m g μ (b/2) |Δθ| / η*. Driving at 0.5 m/s with both sensors, that is about 42 W, so
+**1 Wh lasts about 85 s**. The test floor is small (28 × 20 m), so only 1–3 Wh batteries run low
+within a mission; a real robot carries a few hundred Wh for a far larger site.
+
+**Battery** (the same for every robot, or different per robot), three rules:
+
+* **Energy-aware task choice.** Before a robot takes a task (frontier, sighting, pattern
+  waypoint), it checks it can drive there (d), work there (a 5 s scan), and still get home (d_home,
+  from a distance field grown from the base on its own map):
+  1.3·(e·d + P·(d/v + 5 s)) + 1.3·(e·d_home + P·d_home/v) + 5 % of capacity ≤ energy left.
+  Tasks that do not fit are left to teammates with more charge.
+* **Turn home in time.** On the way it heads home as soon as only 1.3 × the drive back + 5 % is left.
+* **Recharge and resume** (*At base: Recharge*): it docks at the base, charges at 60 W (1 Wh per
+  minute), and goes back out, continuing its coverage pattern at the waypoint where it stopped.
+  With *Stay* it remains at the base and its area is left to the others. If even a full battery
+  cannot reach anything that is left, the robot says so and stays home (no endless docking).
+
+At 0 J a robot stops where it is (this does not happen with the rules above; the tests check it).
+The 3-D view shows each robot's charge on its name tag (green, amber below 45 %, red below 20 %,
+⚡ while charging); the Robots tab shows capacity, charge, trips to the charger and time charging.
 
 ### Which route (planners.py)
 
@@ -672,30 +743,64 @@ many goals at once); the planner then plans the route to the chosen goal.
 |---|---|---|
 | **Dijkstra** | expands cells in order of route cost g | always the shortest route; searches evenly in all directions |
 | **A\*** | expands in order of f = g + h, h = octile distance max(dx,dy) + 0.4142·min(dx,dy) | h never overestimates, so the same shortest route as Dijkstra, with 3–10× fewer cells expanded |
-| **RRT\*** | two random trees (from the robot and from the goal) of straight lines join the cheapest neighbour within r = γ√(log n / n) and rewire neighbours through each new point; once a route of cost c exists, samples come only from the ellipse \|p−start\| + \|p−goal\| ≤ c (Informed RRT*); the final route is shortcut along lines of sight | routes at any angle in open space; random, so different every run; narrow doors are hard to hit by chance, and then it falls back to A* (and says so) |
-| **Ant colony** | 10 ants walk towards the goal choosing the next cell with probability ∝ τ^α η^β (τ pheromone, η = 1 / (step + distance to goal), α = 1, β = 4), backtracking out of dead ends; arriving ants lay Q / L, pheromone evaporates by ρ = 0.3 per round, the best route is reinforced; stops after 3 rounds without improvement | a nature-inspired search that finds good (not always shortest) routes; random |
+| **RRT\*** | two random trees (from the robot and from the goal) of straight lines join the cheapest neighbour within r = γ√(log n / n) and rewire neighbours through each new point (a rewired point passes its saving on to its whole subtree, so cost(child) = cost(parent) + \|edge\| always holds); once a route of cost c exists, samples come only from the ellipse \|p−start\| + \|p−goal\| ≤ c (Informed RRT*); the final route is shortcut along lines of sight and drawn onto the grid with Bresenham's line algorithm, so every straight piece costs exactly its octile length | routes at any angle in open space; random, so different every run; narrow doors are hard to hit by chance, and then it falls back to A* (and says so) |
+| **Ant colony** | 10 ants walk towards the goal choosing the next cell with probability ∝ τ^α η^β (τ pheromone, η = 1 / (1 + detour), detour = step + h(next) − h(here) ≥ 0 = how much the move lengthens the best route still possible, h = octile distance to the goal; α = 1, β = 4), backtracking out of dead ends; arriving ants lay Q / L, pheromone evaporates by ρ = 0.3 per round, the best route is reinforced; stops after 3 rounds without improvement | a nature-inspired search that finds good (not always shortest) routes; random |
 
-Measured on 24 random routes in three buildings (`tests/test_navigation.py` checks the same
-properties): A* and Dijkstra always give the optimal length; A* expands 164 cells on average
-against 586 and needs 1.6 ms against 4.9 ms. RRT* routes average 1.21× the optimum (20 of 24
-found without falling back to A*, 160 ms), the ant colony 1.14× (22 of 24, 400 ms).
+Measured on 40 random routes on the open test ground (`python scripts/check_algorithms.py`;
+`tests/test_navigation.py` checks the same properties): Dijkstra and A* always give the optimal
+length; A* expands 87 cells on average against 974 (1.1 ms against 9 ms). RRT* routes average
+1.013× the optimum (worst 1.085, 48 ms), the ant colony 1.011× (worst 1.089, 100 ms); all 40
+routes of both are valid and none needed the A* fallback.
+
+Two corrections made these numbers what they are. RRT* used to trace its straight lines onto
+the grid cell by cell along the exact line, which turns every slanted line into a staircase of
+straight steps (a line 10 right and 3 down cost 13 instead of 11.2): its routes averaged 1.18× the
+optimum. And the ants' η = 1 / (step + distance to goal) hardly distinguishes neighbouring cells
+far from the goal ((41/40)^4 ≈ 1.1), so the ants mostly wandered: 1.25× the optimum at 370 ms.
 
 The **planner search** layer shows, for the selected robot, what its planner looked at: the cells
 Dijkstra or A* expanded, the RRT* trees, or the cells the ants left pheromone on. The Robots tab
 shows each route's length, the work done and the time taken.
 
-### In which order (coverage.py)
+### How the building is covered (coverage.py)
 
-The candidates are always the frontier goals (the edge of the searched area), so every pattern ends
-only when nothing reachable is left unsearched. The pattern adds an order score *s* (0 = next,
-1 = last) that each strategy uses in its own units: the auction adds 12 × (1 − s) to a goal's value;
-greedy and partition add 25 m × s to its distance.
+* **Frontier-based exploration** (Yamauchi 1997), the default: no fixed path. A robot drives to
+  the edge of the searched area, looks, and chooses again; *which* edge is the strategy's choice
+  (nearest for greedy, value − 0.5 × distance in the auction, own zone for partition).
+* **Lawnmower (boustrophedon)** and **spiral**: fixed paths. The building's rectangle (known to
+  rescuers; its inside is not) is split into one equal rectangle per robot, an r × c grid chosen
+  to make them as square as possible, and robots are matched to rectangles so the total drive to
+  the pattern starts is shortest (Hungarian method). Each robot then drives its own pattern:
+  * lane spacing w = 2·R·sin(F/2)·(1 − 0.25): a forward camera of range R and field of view F
+    sees a band 2·R·sin(F/2) wide as it drives, and neighbouring lanes overlap by 25 % (5.3 m for
+    the default 5 m, 90° camera; 1.5 × the LiDAR range for a LiDAR-only team);
+  * **lawnmower**: K = ⌈D / w⌉ lanes parallel to the rectangle's *longer* side (fewest lanes, so
+    fewest turns), lane k at a₀ + (k + ½)·D / K, alternating direction. Neighbouring lanes are at
+    most w apart and the outer ones at most w / 2 from the edge;
+  * **spiral**: from a corner, the top edge, right edge, bottom edge and left edge, each edge
+    moving in by one spacing once driven, until opposite edges meet. The passes lie on the same
+    lines as the lawnmower's, so the same spacing guarantee holds;
+  * the pattern starts in the rectangle corner nearest the robot. It is cut into waypoints every
+    1.5 m, and the robot drives from one to the next with the chosen route planner. It assumes
+    unmapped ground is free and replans when its sensors show an obstacle on the route. A
+    waypoint that turns out to be inside an obstacle, or unreachable, is skipped (a red × in the
+    3-D view);
+  * a sighting within 6 m is checked on the way (one robot per sighting). Once its pattern is
+    done, the robot searches what the patterns missed (behind obstacles) by frontier exploration,
+    so every mode ends only when nothing reachable is left unsearched.
 
-* **Frontier**: no order; value (cells of unsearched space) against distance.
-* **Lawnmower (boustrophedon)**: lanes one camera range wide, w; lane k = ⌊y / w⌋ is swept left to
-  right when k is even, right to left when odd: key = k·W + (x or W − 1 − x).
-* **Spiral**: ring k = ⌊distance to the outer wall / w⌋, outside in; inside a ring clockwise from the
-  entrance: key = k·2π + ((φ − φ_entrance) mod 2π).
+The **Coverage patterns** layer draws each robot's pattern (dashed; dot = start, ring = next
+waypoint) and **Where each robot has driven** its real track, so you can see how closely the robots
+follow it. The Robots tab shows the waypoint count, how many were reached and how many skipped.
+
+**Open test ground** (building *plain*): one hall, a 2 × 2 m block in the middle, two crates,
+cabinets in the four corners, shelves and counters along the walls, a painted 2 m grid, no
+rubble and no look-alikes; the obstacles are the same every time. Made for checking the
+algorithms. `python scripts/check_algorithms.py [--robots N] [--planner P]` runs every
+pattern there and writes `results/algorithms/check.md` and `coverage.png`. With 1 robot and the
+default 5.3 m spacing: the lawnmower (4 lanes, 108 m) reaches 75 of 77 waypoints (2 lie on a
+victim), keeps to its lanes within 0.21 m on average (the grid's cells are 0.5 m), and has searched
+97 % of the ground when it is done; the spiral (2 rings, 95 m) 67 of 68 waypoints, 0.29 m, 97.5 %.
 
 ### Obstacles, teammates and dead ends (motion.py, simulator.py)
 
@@ -736,6 +841,23 @@ perfect-eyes vision), averages:
 | Battery 3 Wh | 211 s | 340 m | 11.3 Wh | 40 % | 12.7 | 13 ms |
 | Rubble 2× | 305 s | 479 m | 16.1 Wh | 46 % | 15.0 | 13 ms |
 
+The RRT*, ant colony, lawnmower and spiral rows above were measured before the planners were
+corrected and the patterns became real sweeps (see *Which route* and *How the building is covered*).
+Re-measured afterwards on six missions of the same kind (office, warehouse, hospital; seeds 0
+and 1; 4 robots, coordinated, perfect vision), with its own baseline:
+
+| Setting | Mission time | Distance | Energy | Moves over ground already driven | Waits for a teammate |
+|---|---|---|---|---|---|
+| Frontier + Dijkstra (default) | 317 s | 508 m | 16.9 Wh | 46 % | 13.2 |
+| RRT* | 350 s | 542 m | 19.2 Wh | 45 % | 17.2 |
+| Ant colony | 351 s | 533 m | 18.9 Wh | 43 % | 14.0 |
+| Lawnmower | 390 s | 640 m | 20.0 Wh | 48 % | 16.2 |
+| Spiral | 377 s | 628 m | 19.8 Wh | 49 % | 18.2 |
+
+All 30 missions searched 100 % with every robot back at base. In walled buildings the fixed
+patterns now cost 20–25 % more driving than frontier exploration, as expected: many lane
+waypoints lie inside rooms reached only through a door far away.
+
 Every row searched 100 % of the building with every robot back at base, except the 3 Wh battery:
 the robots turned home in time (no battery ran flat) and left 7.7 % unsearched. How to read it:
 
@@ -744,8 +866,9 @@ the robots turned home in time (no battery ran flat) and left 7.7 % unsearched. 
   (six missions are too few to average it out). The real difference is effort: 1 ms against 14 ms.
 * **RRT* and the ant colony** plan longer routes on a grid building full of walls and doors, and
   take 200 ms per route. They are built for other problems (continuous space, changing costs).
-* **Lawnmower and spiral** are systematic but drive more than frontier exploration in a building
-  whose walls cut the lanes; they suit open halls.
+* **Lawnmower and spiral** follow their fixed paths and so drive more than frontier exploration in
+  a building whose walls cut the lanes (many waypoints fall inside walls and rooms are entered
+  from the wrong side); they suit open halls such as the test ground.
 * **DWA** almost removes waiting for teammates (3 against 14.5) at the cost of 7 % more time,
   because it keeps clear of walls. **Avoiding revisits** cuts driving over the same ground from 42 %
   to 33 % of moves.
@@ -876,6 +999,12 @@ inside an obstacle.
 ---
 
 ## 14. Results
+
+> **Note (Sep 2026).** The tables in this section were measured with the earlier confirmation rule
+> (detection 0.85, evidence 6.0, 4 frames) and before the team-verdict fix of section 7.3. The
+> current rule (0.92, 9.0, 6 frames) has markedly fewer false alarms at the cost of 1–3 confirmed
+> victims per 108; section 7.4 has the before/after comparison on unseen missions, and
+> `python scripts/reliability.py` measures the current behaviour.
 
 All numbers come from **buildings never used for training or tuning**: 4 buildings of each of
 the six types (24 per row, seeds 200+), 4 robots, 10 victims, 12 look-alikes, 6 warm objects,
@@ -1047,6 +1176,7 @@ python -m rescue simulate --building office --sensors lidar    # laser only: map
 python -m rescue benchmark --building all --vision all --seeds 4 --seed 200 --out results/vision   # every vision mode x every strategy
 python -m rescue benchmark --building all --vision fusion --strategies partition coordinated --seeds 4 --seed 200 --no-lidar --out results/no_lidar
 python scripts/rescue_experiments.py                          # team-size study
+python scripts/check_algorithms.py --robots 2                 # planners + coverage patterns on the test ground
 python -m rescue train                                        # re-train all three detectors (~1 h on CPU)
 python -m rescue train --modality thermal                     # ...or just one of cnn | thermal | fusion
 pytest                                                        # 57 tests
@@ -1084,7 +1214,7 @@ multi-robot/
 │   ├── mapping.py                    evidence grid (LiDAR + camera), searched layer, frontiers, Dijkstra
 │   ├── coordination.py               the four team strategies and the reason behind every choice
 │   ├── planners.py                   route planners: Dijkstra, A*, RRT* (bidirectional, informed), ant colony
-│   ├── coverage.py                   coverage patterns: frontier, lawnmower (boustrophedon), spiral
+│   ├── coverage.py                   coverage patterns: frontier, lawnmower (boustrophedon), spiral: regions, lanes, waypoints
 │   ├── motion.py                     kinematics, energy and battery, Dynamic Window Approach, dead-end detection
 │   │
 │   ├── simulator.py         RUNNING  the sense → spot → share → believe → decide → move loop
@@ -1112,6 +1242,7 @@ multi-robot/
 ├── models/                  victim_detector.pt (colour), thermal_detector.pt, fusion_detector.pt (+ .json test scores)
 ├── results/                 benchmark tables and charts, screenshots
 ├── scripts/rescue_experiments.py     team-size study
+├── scripts/check_algorithms.py      checks planners and coverage patterns on the open test ground
 ├── tests/test_rescue.py     57 tests
 ├── pyproject.toml  requirements.txt
 └── README.md

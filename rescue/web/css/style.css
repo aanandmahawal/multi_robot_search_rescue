@@ -381,3 +381,8 @@ input[type=range] { accent-color: var(--accent); min-width: 0; }
 }
 ::-webkit-scrollbar { width: 9px; } ::-webkit-scrollbar-thumb { background: #243247; border-radius: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* Battery = "Different per robot": one small choice per robot */
+.battery-each { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin: 2px 0 10px; }
+.battery-each label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted, #8b98a8); }
+.battery-each select { flex: 1; min-width: 0; font-size: 12px; padding: 3px 4px; }

@@ -53,7 +53,7 @@ export function drawVictimMap() {
   $("vmapKeys").innerHTML = keys.join("");
   $("vmapNote").textContent = !world.has_cameras
     ? "These robots carry only a LiDAR: the map shows the building, but nobody can be found without a camera."
-    : `The robots confirmed ${rep.confirmed} ${rep.confirmed === 1 ? "person" : "people"}: ${rep.real} real victim${rep.real === 1 ? "" : "s"} and ${rep.false} false alarm${rep.false === 1 ? "" : "s"}. ` +
+    : `The robots confirmed ${rep.confirmed} ${rep.confirmed === 1 ? "person" : "people"}: ${rep.real} real victim${rep.real === 1 ? "" : "s"} and ${rep.false} false alarm${rep.false === 1 ? "" : "s"}${rep.twice ? `, ${rep.twice} counted twice` : ""}. ` +
       `${rep.suspected} more ${rep.suspected === 1 ? "sighting is" : "sightings are"} being checked. The robots cannot tell a false alarm from a victim; the simulator can, and marks it here.`;
 }
 

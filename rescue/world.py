@@ -8,6 +8,9 @@ Six realistic building types, each with its own layout and furniture:
   school      classrooms with rows of desks along a corridor, and a gym with bleachers
   parking     a parking garage: rows of parked cars, pillars and painted bays
   warehouse   offices along the top and a hall full of pillars and storage racks
+  plain       an open test ground: one hall, a few fixed obstacles (in the middle, in the
+              corners, along the walls), no rubble and no look-alikes. For checking how the
+              coverage patterns and route planners behave.
 
 Furniture is real: it blocks the robots' way, and tall pieces (desks, shelves, cars,
 racks) block the camera's view.
@@ -46,7 +49,7 @@ SHIRTS = np.array([(200, 40, 40), (40, 80, 190), (40, 150, 70), (230, 200, 40), 
                    (225, 225, 225), (110, 110, 115), (30, 30, 35), (130, 60, 150)])
 PANTS = np.array([(35, 45, 90), (25, 25, 28), (170, 150, 110), (90, 90, 95), (60, 50, 40)])
 
-BUILDINGS = ("office", "apartments", "hospital", "school", "parking", "warehouse")
+BUILDINGS = ("office", "apartments", "hospital", "school", "parking", "warehouse", "plain")
 # damage level -> (share of walls that collapse, rubble density, share of victims partly buried)
 DAMAGE = {"light": (0.10, 0.03, 0.2), "moderate": (0.25, 0.06, 0.4), "severe": (0.45, 0.10, 0.6)}
 
@@ -78,6 +81,7 @@ FLOORS = {
     "school": ((164, 150, 122), (150, 150, 146), (178, 132, 80)),
     "parking": ((74, 76, 80), (86, 88, 92), (74, 76, 80)),
     "warehouse": ((96, 94, 90), (110, 108, 104), (104, 100, 96)),
+    "plain": ((138, 140, 136), (138, 140, 136), (138, 140, 136)),
 }
 
 
@@ -418,8 +422,34 @@ def _layout_warehouse(p: Plan):
             x += length + 3
 
 
+def _layout_plain(p: Plan):
+    """Open test ground: one empty hall with a few fixed obstacles, the same every time.
+
+    In the middle: a 2 x 2 m block at the centre and two 1 x 1 m crates on the diagonal.
+    In the four corners: 1.5 x 1.5 m cabinets. Along the walls: a shelf on the top wall, one on the
+    bottom wall, a counter on the right wall and one on the left wall (away from the entrance).
+    A painted 2 m grid on the floor makes it easy to judge how straight the robots drive."""
+    bx0, bx1, by0, by1 = p.bx0, p.bx1, p.by0, p.by1
+    cx, cy = (bx0 + bx1) // 2, (by0 + by1) // 2
+    p.add("cabinet", cx - 2, cy - 2, 4, 4)                                        # middle
+    p.add("cabinet", bx0 + 11, by0 + 9, 2, 2)
+    p.add("cabinet", bx1 - 13, by1 - 11, 2, 2)
+    for x0, y0 in ((bx0 + 1, by0 + 1), (bx1 - 3, by0 + 1), (bx0 + 1, by1 - 3), (bx1 - 3, by1 - 3)):
+        p.add("cabinet", x0, y0, 3, 3)                                            # corners
+    p.add("shelf", bx0 + 15, by0 + 1, 8, 1)                                       # along the walls
+    p.add("shelf", bx1 - 22, by1 - 1, 8, 1)
+    p.add("counter", bx1 - 1, cy - 4, 1, 8)
+    p.add("counter", bx0 + 1, by0 + 7, 1, 5)
+    c = 0.5
+    for x in range(bx0 + 1, bx1 + 1, 4):
+        p.markings.append([x * c, (by0 + 1) * c, x * c, by1 * c])
+    for y in range(by0 + 1, by1 + 1, 4):
+        p.markings.append([(bx0 + 1) * c, y * c, bx1 * c, y * c])
+
+
 LAYOUTS = {"office": _layout_office, "apartments": _layout_apartments, "hospital": _layout_hospital,
-           "school": _layout_school, "parking": _layout_parking, "warehouse": _layout_warehouse}
+           "school": _layout_school, "parking": _layout_parking, "warehouse": _layout_warehouse,
+           "plain": _layout_plain}
 
 
 # ------------------------------------------------------------------ build
@@ -482,6 +512,8 @@ def generate(cfg: RescueConfig) -> World:
     free = ~blocked
     free[:, :bx0 + 1] = False
     n_piles = min(int(rubble_density * cfg.obstacle_density * free.sum() / 4), int(free.sum()) // 2)
+    if building == "plain":
+        n_piles = 0                                                    # the test ground keeps only its fixed obstacles
     fy, fx = np.nonzero(free)
     for i in rng.choice(len(fx), size=n_piles, replace=False):
         x, y = int(fx[i]), int(fy[i])
@@ -523,7 +555,7 @@ def generate(cfg: RescueConfig) -> World:
         tone = rng.choice([(120, 115, 108), (135, 120, 100), (100, 98, 95)])
         color[sy, sx] = np.array(tone) + rng.normal(0, 14, (FINE, FINE, 3))
     # light debris on the floor: visual clutter only, robots drive over it
-    clutter = (rng.random((Hf, Wf)) < 0.04) & (obj == OBJ_FLOOR)
+    clutter = (rng.random((Hf, Wf)) < (0.0 if building == "plain" else 0.04)) & (obj == OBJ_FLOOR)
     height[clutter] = rng.uniform(0.03, 0.08, clutter.sum())
     obj[clutter] = OBJ_DEBRIS
     color[clutter] = np.array([110, 95, 75]) + rng.normal(0, 15, (clutter.sum(), 3))
@@ -647,7 +679,7 @@ def _place_people_and_decoys(world: World, rng, buried_fraction: float) -> None:
         "barrel": (2, 2, lambda: np.array([235, 110, 20]), 0.55),
     }
     names = list(kinds)
-    for j in range(cfg.n_decoys):
+    for j in range(0 if cfg.building == "plain" else cfg.n_decoys):     # the test ground has no look-alikes
         kind = names[j % len(names)]
         L, Wd, col_fn, h = kinds[kind]
         placed = _try_place(world, rng, L, Wd)

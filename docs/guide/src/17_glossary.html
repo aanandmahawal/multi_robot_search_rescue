@@ -1,0 +1,73 @@
+<h1><span class="num">17</span>Glossary and formula sheet</h1>
+
+<h2>17.1 Glossary</h2>
+<table>
+<tr><th style="width:22%">Term</th><th>Meaning in this project</th></tr>
+<tr><td>A*</td><td>best-first graph search ordered by f = g + h; optimal with an admissible, consistent h (octile distance here)</td></tr>
+<tr><td>admissible heuristic</td><td>an estimate of remaining cost that never overestimates</td></tr>
+<tr><td>ant colony optimisation</td><td>many simulated ants build paths guided by pheromone and a heuristic; pheromone rewards short paths and evaporates</td></tr>
+<tr><td>auction (sequential)</td><td>repeatedly assign the (robot, task) pair with the highest utility, then update the others' utilities</td></tr>
+<tr><td>belief / log-odds</td><td>ln(p/(1−p)); evidence adds up; used for map cells and for victim candidates</td></tr>
+<tr><td>boustrophedon</td><td>lawnmower coverage: parallel lanes in alternating directions</td></tr>
+<tr><td>Bresenham line</td><td>the 8-connected cell chain of a straight segment; its length is the octile distance</td></tr>
+<tr><td>bumper</td><td>contact sensor; driving into a cell the map wrongly called free marks it as proven solid</td></tr>
+<tr><td>candidate / confirmed / rejected</td><td>states of a sighting in the belief filter</td></tr>
+<tr><td>cell</td><td>a 0.5 m × 0.5 m square of the navigation grid (fine grid: 0.25 m)</td></tr>
+<tr><td>CNN</td><td>convolutional neural network; here a small fully convolutional heatmap detector</td></tr>
+<tr><td>corner cutting</td><td>a diagonal move past an obstacle's corner; never allowed</td></tr>
+<tr><td>counted twice</td><td>a real person confirmed again more than 1.6 m from the first report</td></tr>
+<tr><td>coverage (searched)</td><td>share of reachable floor seen by a camera</td></tr>
+<tr><td>dead end / tabu</td><td>loop or blockage detection; back off and avoid that goal for 60 s</td></tr>
+<tr><td>decoy / look-alike</td><td>an object that can fool a colour camera (jacket, bag, box, beam, barrel)</td></tr>
+<tr><td>differential drive</td><td>two tracks or wheels; turns on the spot by driving them in opposite directions</td></tr>
+<tr><td>dilated convolution</td><td>a convolution with gaps between its taps: a wider view for the same cost</td></tr>
+<tr><td>Dijkstra</td><td>optimal shortest paths with non-negative costs; also the distance field used to pick goals</td></tr>
+<tr><td>distance field</td><td>route distance from one cell to every cell (one Dijkstra run)</td></tr>
+<tr><td>DWA</td><td>Dynamic Window Approach: score the admissible next moves by heading, clearance, progress and turn</td></tr>
+<tr><td>evidence grid / occupancy grid</td><td>a map of per-cell belief of being occupied</td></tr>
+<tr><td>free-space assumption</td><td>planning as if unknown cells were free (used for pattern waypoints)</td></tr>
+<tr><td>frontier</td><td>a searched free cell next to unsearched space</td></tr>
+<tr><td>ground truth</td><td>the real world state, known only to the simulator (for rendering and scoring)</td></tr>
+<tr><td>Hungarian method</td><td>an optimal solver for one-to-one assignment (robots ↔ pattern regions)</td></tr>
+<tr><td>informed sampling</td><td>RRT* samples only inside the ellipse where a shorter route could exist</td></tr>
+<tr><td>inverse sensor model</td><td>turning a measurement into evidence about cells (beam passed → free, ended → occupied)</td></tr>
+<tr><td>LiDAR</td><td>laser range finder: 240 distances per turn in a plane 40 cm above the floor</td></tr>
+<tr><td>octile distance</td><td>max(dx, dy) + (√2 − 1)·min(dx, dy): exact cost on an empty 8-connected grid</td></tr>
+<tr><td>precision / recall</td><td>share of reports that were real / share of real victims that were reported</td></tr>
+<tr><td>probe</td><td>drive into an unresolvable cell and let the bumper decide</td></tr>
+<tr><td>ray casting / ray marching</td><td>following a line through the world until it hits a surface (LiDAR, camera)</td></tr>
+<tr><td>RGB-D camera</td><td>colour camera with per-pixel depth</td></tr>
+<tr><td>RRT*</td><td>sampling-based planner growing a tree of straight segments; asymptotically optimal with rewiring</td></tr>
+<tr><td>seed</td><td>the starting number of a random generator; the same seed gives the same building and mission</td></tr>
+<tr><td>SLAM</td><td>simultaneous localisation and mapping (not simulated here: positions are exact)</td></tr>
+<tr><td>verify goal</td><td>a trip to look closely at an uncertain sighting</td></tr>
+<tr><td>waypoint</td><td>a point on a coverage pattern, at most 1.5 m from the previous one</td></tr>
+</table>
+
+<h2>17.2 Formula sheet</h2>
+<table>
+<tr><th style="width:30%">What</th><th>Formula (defaults)</th></tr>
+<tr><td>metres ↔ cells</td><td>cell = floor(m / 0.5); centre = (cell + ½) · 0.5 m</td></tr>
+<tr><td>step cost</td><td>1 straight, √2 ≈ 1.4142 diagonal (+ 0.3 · min(visits, 5) with Avoid revisits)</td></tr>
+<tr><td>move time</td><td>t = |Δθ| / 180°/s + d / v, &nbsp; v = 0.5 m/s</td></tr>
+<tr><td>octile heuristic</td><td>h = max(dx, dy) + 0.4142 · min(dx, dy)</td></tr>
+<tr><td>A* priority</td><td>f(n) = g(n) + h(n)</td></tr>
+<tr><td>map evidence</td><td>L = Σ (−0.45 per beam through, +0.9 per beam ended), laser |L| ≤ 2.5, camera/bumper ±4; FREE if L ≤ −0.8, OBSTACLE if L ≥ 0.8</td></tr>
+<tr><td>victim evidence</td><td>L = −0.6 + Σ w · ln(p/(1−p)) − Σ 0.9 w, &nbsp; w = 1 (≤ 2.5 m) or 0.55</td></tr>
+<tr><td>confirm / reject</td><td>L ≥ 9 and ≥ 6 frames and one look ≤ 2.5 m / L ≤ −1.5</td></tr>
+<tr><td>heat through rubble</td><td>T = T<sub>amb</sub> + (T<sub>body</sub> − T<sub>amb</sub>) · e<sup>−d / 0.10 m</sup></td></tr>
+<tr><td>auction utility</td><td>u = value − 0.5 · distance(m); value × d/4 m within 4 m of a won goal; taken within 2 m</td></tr>
+<tr><td>verify value</td><td>30 × belief that the sighting is a person</td></tr>
+<tr><td>lane spacing</td><td>w = 2 · R · sin(F/2) · 0.75 ≈ 5.3 m (R 5 m, F 90°)</td></tr>
+<tr><td>lanes</td><td>K = ceil(D / w), lane k at a<sub>0</sub> + (k + ½) · D / K</td></tr>
+<tr><td>RRT* radius</td><td>r = γ · √(log n / n), γ = 2 √(free area / π), capped at 1.5 × step</td></tr>
+<tr><td>ant choice</td><td>P(j) ∝ τ<sub>j</sub> · η<sub>j</sub><sup>4</sup>, η = 1 / (1 + c(i,j) + h(j) − h(i)); τ ← 0.7 τ + Σ 10 / L</td></tr>
+<tr><td>DWA score</td><td>G = 0.45 heading + 0.25 clearance + 0.30 progress − 0.10 turn</td></tr>
+<tr><td>power</td><td>P = 15 + 8 + 6 W; driving 25·9.81·0.05/0.6 + 12 v J/m ≈ 26.4 J/m; turning ≈ 38.5 J per 90°</td></tr>
+<tr><td>task is affordable</td><td>1.3 (e d + P (d/v + 5 s)) + 1.3 (e d<sub>home</sub> + P d<sub>home</sub>/v) + 5 % cap ≤ left</td></tr>
+<tr><td>turn home</td><td>left ≤ 1.3 (e d<sub>home</sub> + P d<sub>home</sub>/v) + 5 % cap</td></tr>
+</table>
+
+<div class="box simple" style="margin-top:6mm"><b>Where to go from here</b>
+<p>Run <code>python -m rescue serve</code>, pick the open test ground, and change one setting at a time while watching the Robots tab: every reason printed there corresponds to a
+section of this guide. Then read the code in the order of chapter 13's table. Each module's docstring summarises it in the same words as this guide.</p></div>

@@ -125,6 +125,8 @@ class Session:
             "thermal_scale": [round(w.ambient - SCALE_BELOW, 1), SCALE_TOP],
             "base": sim.pos(sim.base),
             "zones": "".join(map(str, sim.region.ravel().tolist())),
+            # coverage patterns: one rectangle per robot (x0, y0, x1, y1 metres), None for frontier exploration
+            "regions": None if sim.region_boxes is None else [list(map(float, b)) for b in sim.region_boxes],
             "zone_of": {r.id: r.region for r in sim.robots},
             "reachable": int(w.searchable),
             # what the robots carry: lidar | cameras | both
@@ -193,7 +195,6 @@ class Session:
 
     def state_payload(self, plan_robot: int | None = None) -> dict:
         sim = self.sim
-        cap = sim.cfg.battery_wh * 3600.0
         team = sim.team_map()
         fr = frontiers(explore_map(team, np.logical_or.reduce([r.searched for r in sim.robots]), np.logical_or.reduce([r.gaveup for r in sim.robots])))
         cands = self._team_candidates()
@@ -237,6 +238,16 @@ class Session:
                                                      "x": sim.world.to_metres(r.goal.cell)[0],
                                                      "y": sim.world.to_metres(r.goal.cell)[1]},
                 "path": [sim.world.to_metres(c) for c in r.path[:200]],
+                # where the robot has driven (metres; long tracks thinned to at most ~600 points)
+                "track": [sim.world.to_metres(c) for c in r.track[::max(1, len(r.track) // 600)] + r.track[-1:]],
+                # its coverage pattern: corners (metres), waypoints done, skipped ones
+                "sweep": None if r.sweep is None else {
+                    "pattern": r.sweep.pattern, "describe": r.sweep.describe, "region": r.sweep.region,
+                    "corners": [[round(x, 2), round(y, 2)] for x, y in r.sweep.corners],
+                    "next": None if r.sweep.done else [round(v, 2) for v in r.sweep.points[r.sweep.index]],
+                    "index": r.sweep.index, "total": len(r.sweep.cells), "reached": r.sweep.reached,
+                    "skipped": [[round(v, 2) for v in r.sweep.points[i]] + [why] for i, why in r.sweep.skipped],
+                    "finished_at": r.sweep.end_t},
                 "bumps": r.bumps,
                 # navigation: the latest route plan, energy, dead ends (planners.py, motion.py)
                 "plan": None if r.plan is None else {
@@ -244,8 +255,10 @@ class Session:
                     "work": r.plan.expanded, "ms": round(r.plan.ms, 1), "note": r.plan.note},
                 "plans": r.plans, "plan_ms": round(r.plan_ms, 1), "replans": r.replans, "deadends": r.deadends,
                 "conflicts": r.conflicts, "moves": r.moves, "repeat_moves": r.repeat_moves,
-                "energy_wh": round(r.energy_j / 3600.0, 2),
-                "battery": None if not cap else round(max(0.0, 1.0 - r.energy_j / cap), 3), "depleted": r.depleted,
+                "energy_wh": round(r.energy_used / 3600.0, 2),
+                "battery": None if sim.charge(r) is None else round(sim.charge(r), 3), "depleted": r.depleted,
+                "capacity_wh": None if not np.isfinite(sim.capacity(r)) else round(sim.capacity(r) / 3600.0, 2),
+                "charges": r.charges, "charge_s": r.charge_s, "low_battery": r.low_battery,
                 # what the planner looked at for this route (only for the robot the page asks about)
                 "search": (r.plan.search if (r.plan is not None and plan_robot == i) else None),
                 # the latest LiDAR scan: where the beams ended (metres)
@@ -260,7 +273,10 @@ class Session:
                            for c in cands],
             # what the robots reported, checked against the truth: confirmed = real + false
             "reports": {"confirmed": len(confirmed), "real": sum(c["truth"]["real"] for c in confirmed),
-                        "false": sum(not c["truth"]["real"] for c in confirmed),
+                        # confirmed where nobody is (a dog, a heater, a jacket, nothing) ...
+                        "false": sum(c["truth"]["kind"] not in ("victim", "duplicate") for c in confirmed),
+                        # ... and a person already counted, confirmed a second time (> 1.6 m from the first report)
+                        "twice": sum(c["truth"]["kind"] == "duplicate" for c in confirmed),
                         "suspected": sum(c["status"] == "candidate" for c in cands),
                         "repeats": sim.repeated_reports()},      # second reports of the same person, merged into the first
             "victim_status": victim_status,
@@ -400,6 +416,7 @@ def _cfg_from(q, base: RescueConfig) -> RescueConfig:
     clamp = lambda v, lo, hi: max(lo, min(hi, v))
     planner = g("planner", str, base.planner)
     coverage = g("coverage", str, base.coverage)
+    each = tuple(clamp(float(v), 0.0, 500.0) for v in g("battery_each", str, "").split(",") if v.strip())
     avoidance = g("avoidance", str, base.avoidance)
     if planner not in PLANNERS or coverage not in PATTERNS or avoidance not in ("none", "dwa"):
         raise ValueError("bad planner, coverage pattern or obstacle avoidance")
@@ -409,6 +426,7 @@ def _cfg_from(q, base: RescueConfig) -> RescueConfig:
                    n_victims=max(1, min(16, n)), victims_known=known, lidar=lidar,
                    comm_range=0.0, seed=seed,
                    planner=planner, coverage=coverage, avoidance=avoidance,
+                   battery_each=each, recharge=g("recharge", str, "1" if base.recharge else "0") == "1",
                    speed=clamp(g("speed", float, base.speed), 0.2, 1.5),
                    battery_wh=clamp(g("battery", float, base.battery_wh), 0.0, 500.0),
                    camera_range=clamp(g("camrange", float, base.camera_range), 2.0, 8.0),
@@ -463,7 +481,8 @@ class Compare:
             self.jobs[job] = {"dimension": dimension, "fast": fast, "futures": futures, "started": time.time(),
                               "settings": {k: getattr(cfg, k) for k in ("building", "damage", "seed", "run_seed", "n_robots",
                                                                         "strategy", "planner", "coverage", "avoidance",
-                                                                        "vision", "lidar", "speed", "battery_wh")}}
+                                                                        "vision", "lidar", "speed", "battery_wh",
+                                                                        "battery_each", "recharge")}}
         return job
 
     def status(self, job: str) -> dict:

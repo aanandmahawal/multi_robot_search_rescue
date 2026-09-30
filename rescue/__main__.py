@@ -67,7 +67,7 @@ def cmd_train(a):
 
 def cmd_benchmark(a):
     base = _cfg(a)
-    buildings = BUILDINGS if a.building == "all" else (base.building,)
+    buildings = [b for b in BUILDINGS if b != "plain"] if a.building == "all" else (base.building,)
     configs = [replace(base, strategy=s, building=b, seed=a.seed + k)
                for s in a.strategies for b in buildings for k in range(a.seeds)]
     visions = [v for v in VISION_MODES if v != "none"] if a.vision == "all" else (base.vision,)

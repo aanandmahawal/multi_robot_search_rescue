@@ -12,6 +12,13 @@ victim is there (a standard Bayesian evidence filter). A close look counts more 
 distant one. A candidate is **confirmed** once its evidence crosses ``confirm_logodds`` and
 **rejected** when it drops below ``reject_logodds``. Uncertain candidates become
 "go and take a closer look" tasks for the team.
+
+**One verdict for the whole team.** Evidence is a plain sum (the order of the reports does not
+matter) and the verdict is only taken in ``settle``, once per second, after the robots have
+exchanged their reports; every robot applies new reports in the same order (by report id). So
+robots that hold the same reports always hold the same verdict: one robot cannot confirm a
+sighting that another rejected on the same evidence. A confirmation is final (it has been passed
+on to the rescuers); a rejection is not: new, stronger sightings can reopen a candidate.
 """
 from __future__ import annotations
 
@@ -59,6 +66,7 @@ class Candidate:
     closest: float = float("inf")                  # closest distance it was seen from
     tried_spots: list = field(default_factory=list)   # where close looks were taken from
     temp: float | None = None                      # warmest temperature reported here (thermal camera)
+    dirty: bool = False                            # new evidence since the last verdict
 
 
 def distinct(confirmed: list) -> list:
@@ -93,17 +101,20 @@ class Registry:
         return best
 
     def apply(self, r: Report) -> str | None:
-        """Fuse one report. Returns "confirmed" / "rejected" if the candidate changed status."""
+        """Add one report's evidence (the verdict waits for ``settle``). Returns "new" when the
+        report opened a new candidate."""
         if r.id in self.known:
             return None
         self.known.add(r.id)
         close = r.distance <= self.cfg.verify_distance
         w = 1.0 if close else 0.55
         c = self._near(r.x, r.y, MERGE_RADIUS)
+        new = None
         if r.positive:
             if c is None:
                 c = Candidate(len(self.candidates), r.x, r.y, PRIOR, r.t)
                 self.candidates.append(c)
+                new = "new"
             c.logodds += w * _logit(r.confidence)
             wt = w * r.confidence
             c.x = (c.x * c.weight + r.x * wt) / (c.weight + wt)
@@ -116,12 +127,24 @@ class Registry:
             if r.temp is not None:
                 c.temp = r.temp if c.temp is None else max(c.temp, r.temp)
         else:
-            if c is None or c.status == "confirmed":
+            if c is None:
                 return None
             c.logodds -= 0.9 * w
             c.negatives += 1
-        c.logodds = float(np.clip(c.logodds, -6, 8))
-        return self._update_status(c, r.t)
+        c.dirty = True
+        return new
+
+    def settle(self, t: int) -> list[tuple[Candidate, str]]:
+        """Take the verdict on every candidate whose evidence changed. Returns the changes
+        [(candidate, "confirmed" | "rejected")]."""
+        out = []
+        for c in self.candidates:
+            if c.dirty:
+                c.dirty = False
+                change = self._update_status(c, t)
+                if change:
+                    out.append((c, change))
+        return out
 
     def _update_status(self, c: Candidate, t: int) -> str | None:
         if c.status == "confirmed":

@@ -1,0 +1,89 @@
+<h1><span class="num">4</span>Sensors</h1>
+<p class="lead">Every robot carries three sensors that complement each other. The <b>LiDAR</b> measures geometry all around. The <b>RGB-D camera</b> sees colour
+and distance ahead, including low objects. The <b>thermal camera</b> sees warmth. None of them "knows" anything. Each produces numbers that later stages must
+interpret.</p>
+
+<table>
+<tr><th>Sensor</th><th>Sees</th><th>Range / field</th><th>Good at</th><th>Cannot</th></tr>
+<tr><td><b>LiDAR</b></td><td>distance to surfaces crossing a plane 40 cm up</td><td>8 m, 360°, 240 beams (1.5° apart)</td><td>fast, accurate (±2 cm) maps of walls, in the dark</td><td>see anything lower than 40 cm (a lying person); tell a person from a box</td></tr>
+<tr><td><b>RGB-D camera</b></td><td>colour + depth of every pixel</td><td>5 m, 90° wide, 64 × 48 px, 0.55 m high</td><td>low objects on the floor; what things look like</td><td>see in the dark without its headlamp; see through dust well; see behind furniture</td></tr>
+<tr><td><b>Thermal camera</b></td><td>surface temperature of every pixel (°C)</td><td>same view as the colour camera</td><td>warm bodies, in the dark, through dust</td><td>see through thick rubble; tell a dog (33 °C) from a person</td></tr>
+</table>
+
+<h2>4.1 LiDAR: a spinning laser</h2>
+<p>A real LiDAR fires a laser pulse and times the echo: distance = speed of light × round-trip time / 2. In the simulation there is no light to time,
+so the same result is computed by <b>ray casting</b>: for each of the 240 beam directions, walk along the beam and find the first place where the world is
+taller than the scan plane.</p>
+<pre>for every beam angle a (240 of them):
+    walk from the robot in steps of 8 cm:  p = robot + t·(cos a, sin a)
+    stop at the first sample whose fine-grid height > 0.40 m   (a surface crossing the scan plane)
+    refine the last step to 1 cm            (find the surface as precisely as a real laser)
+    measured = true distance + Gaussian noise (σ = 2 cm)
+    with 1 % probability: the beam returns nothing (dropout)</pre>
+
+<p>A beam gives two kinds of information. Every cell it passed through is probably <b>free</b>, because light went through it. The cell where it ended probably
+contains a <b>surface</b>. Turning beams into this cell-level evidence is called the <b>inverse sensor model</b>. The project counts, for every cell, how many
+beams passed through it and how many ended in it. A cell is "hit" only if more beams ended in it than passed through it. Two small margins make this robust
+to 2 cm noise: a beam proves free space only up to 6 cm before its measured end, and its hit is placed 3 cm behind the surface, so a beam that grazes a wall
+corner doesn't end in the empty cell beyond.</p>
+
+<figure>
+<svg viewBox="0 0 700 150" width="700">
+  <g stroke="#c5ccd6"><path d="M20 30H620M20 80H620M20 130H620"/><g><path d="M20 30V130M70 30V130M120 30V130M170 30V130M220 30V130M270 30V130M320 30V130M370 30V130M420 30V130M470 30V130M520 30V130M570 30V130M620 30V130"/></g></g>
+  <rect x="70" y="30" width="400" height="50" fill="#e6f5eb"/>
+  <rect x="470" y="30" width="50" height="50" fill="#d9ccff"/>
+  <rect x="520" y="30" width="100" height="50" fill="#2b2f36"/>
+  <rect x="20" y="30" width="50" height="50" fill="#fdeee4"/><text x="45" y="61" text-anchor="middle" class="d-tb" fill="#d9622b">R</text>
+  <path d="M55 55 L512 55" stroke="#7d5cff" stroke-width="2.5" marker-end="url(#ah)"/>
+  <text x="270" y="105" text-anchor="middle" class="d-ts">beam passed through → evidence "free" (−0.45 each)</text>
+  <text x="495" y="105" text-anchor="middle" class="d-ts">ended → "occupied"</text><text x="495" y="120" text-anchor="middle" class="d-ts">(+0.9)</text>
+  <text x="570" y="61" text-anchor="middle" fill="#fff" class="d-ts">wall</text>
+  <text x="320" y="20" text-anchor="middle" class="d-ts">one beam, one row of cells</text>
+</svg>
+<figcaption><b>Figure 4.1</b> The inverse sensor model. Chapter 6 shows how these little amounts of evidence add up over many scans into a reliable map.</figcaption>
+</figure>
+
+<figure><img src="img/lidar.png">
+<figcaption><b>Figure 4.2</b> Left: one real scan in an office. Violet lines are the 240 beams, dots are where they ended. Right: what that single scan says about each
+cell. Note the "shadows" behind furniture: the laser cannot see through things, so the robot must move to see behind them.</figcaption></figure>
+
+<div class="box simple"><b>In simple words</b>
+<p>The laser is like touching everything around you with 240 very long sticks at waist height, once a second. You learn exactly where walls are, but a person lying on the
+floor is below your sticks, and a stick cannot tell you whether it touched a box or a human.</p></div>
+
+<h2>4.2 The RGB-D camera</h2>
+<p>The colour camera is a <b>pinhole camera</b> model: 64 × 48 pixels, 90° field of view, mounted 0.55 m above the floor and tilted 14° down, lit only by the
+robot's headlamp because the building is dark. Each pixel is rendered by <b>ray marching</b>:</p>
+<ol>
+<li>From the camera's focal length f = (W/2) / tan(FOV/2), each pixel (u, v) defines a direction; the tilt rotates it down; the robot's heading rotates it into the world.</li>
+<li>March along the ray in 7 cm steps until the ray's height drops below the height of the fine-grid cell it is over (it hit a surface) or below the floor.</li>
+<li>The pixel's <b>depth</b> is the distance travelled; its <b>colour</b> is the surface colour × shading (top faces bright, side faces 70 %) × a headlamp fall-off
+0.04 + 1.15 / (1 + 0.09 d²); its <b>3-D point</b> is where the ray stopped. That point is how a detection is later placed on the map.</li>
+<li>Sensor imperfections: dust haze grows with distance, exposure varies by −20 %/+15 % per frame, and every pixel gets Gaussian noise.</li>
+</ol>
+<p>For the <b>map</b> and for measuring what has been <b>searched</b>, a cheaper geometric version is used (<code>visible_cells</code>): a fan of rays every
+1.5° across the 90° field, each stopping at the first cell taller than the camera. Every cell a ray reached counts as "seen by a camera". This defines
+<i>coverage</i>: the share of reachable floor some camera has looked at.</p>
+
+<h2>4.3 The thermal camera</h2>
+<p>A thermal camera measures infrared radiation and converts it to temperature. In the simulation it is mounted next to the colour camera and uses the same
+rays. Each pixel reports the <b>temperature of the fine-grid cell its ray hit</b> (chapter 5 explains where those temperatures come from). Then it is made realistic:</p>
+<ul>
+<li><b>dust between camera and object</b> pulls the reading 6 % × (1 − e<sup>−d/4 m</sup>) towards the ambient temperature;</li>
+<li><b>soft optics</b>: a Gaussian blur of 0.8 pixel (thermal lenses are blurrier than colour ones);</li>
+<li><b>sensor noise</b> of 0.25 °C per pixel, plus a <b>calibration drift</b> of about 0.3 °C shared by the whole frame, as in a real uncooled thermal core.</li>
+</ul>
+
+<figure><img src="img/camera.png">
+<figcaption><b>Figure 4.3</b> What one robot sees in one frame, all rendered by <code>sensors.render</code>: the colour image (headlamp only), the depth image (dark = near),
+the thermal image (two warm body parts glow), and the detector's heatmap on top (chapter 7). Yellow outlines are the blocks above the detection threshold.</figcaption></figure>
+
+<div class="box warn"><b>Limitation: temperatures are simulated</b>
+<p>No real heat exists inside a computer. The thermal images are <b>synthetic measurements from a sensor model</b>: each surface has an assigned temperature, and the
+camera model adds the effects a real camera has (blur, noise, drift, haze). Real thermal cameras also depend on <i>emissivity</i> (shiny metal reads colder than
+it is), reflections and humidity, which the model does not include.</p></div>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/lidar.py</code> <code>scan()</code>: beams, noise, dropout and the pass/hit counting. <code>rescue/sensors.py</code>: <code>_camera_rays</code> (pinhole
+geometry with tilt), <code>render</code> (ray marching → colour, depth, 3-D points, thermal image), <code>visible_cells</code> (what the camera covers on the map),
+<code>line_of_sight</code> (used for close looks and radio).</p></div>

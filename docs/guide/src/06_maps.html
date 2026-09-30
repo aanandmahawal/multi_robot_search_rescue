@@ -1,0 +1,88 @@
+<h1><span class="num">6</span>Maps: from measurements to knowledge</h1>
+<p class="lead">A single laser beam can be wrong: noise, a dropout, a beam grazing a corner. So a robot never trusts one measurement. It keeps an
+<b>evidence grid</b>, a probabilistic occupancy map in which every measurement adds a little evidence, and it only calls a cell free or blocked once the
+evidence is clear.</p>
+
+<h2>6.1 Log-odds: adding up evidence</h2>
+<p>For each cell the robot keeps a number L, the <b>log-odds</b> that the cell is occupied: L = ln(p / (1 − p)), where p is the probability of "occupied".
+L = 0 means 50/50 (no idea), positive means probably occupied, negative probably free. Log-odds are used because independent pieces of evidence can simply be
+<b>added</b> (the Bayesian update becomes addition). This is the classic occupancy grid of Moravec and Elfes (1985).</p>
+<table>
+<tr><th>Event</th><th>Change to L</th><th>Why this size</th></tr>
+<tr><td>a laser beam <b>passed through</b> the cell</td><td>−0.45</td><td>weak: a beam could slip past a thin obstacle</td></tr>
+<tr><td>a laser beam <b>ended</b> in the cell</td><td>+0.9</td><td>stronger: a return means something is there</td></tr>
+<tr><td>the laser alone</td><td>never beyond ±2.5</td><td>so closer, better sensors can always overrule it</td></tr>
+<tr><td>the <b>depth camera</b> saw the cell from close by</td><td>set to −4 (free) or +4 (blocked)</td><td>the camera also sees low objects the laser misses; final</td></tr>
+<tr><td>the <b>bumper</b> hit it / the robot stands on it</td><td>+4 (proven solid) / −4 (proven free)</td><td>physical contact is certain</td></tr>
+</table>
+<p>A cell is <b>FREE</b> when L ≤ −0.8, <b>OBSTACLE</b> when L ≥ +0.8, and <b>UNKNOWN</b> in between. Example: two laser beams pass through a cell →
+L = −0.9 → FREE. A cell where one beam ended and two passed: +0.9 − 0.9 = 0 → still UNKNOWN, and the robot waits for more evidence. Cells the camera or bumper
+proved solid are flagged, and later laser beams can never free them again. That matters for a jacket on the floor: every laser beam flies over it, but the camera
+saw it.</p>
+
+<div class="box simple"><b>In simple words</b>
+<p>Each cell has a score. Laser beams flying through it nudge the score towards "free", beams stopping in it nudge it towards "blocked". Only when the score passes a
+threshold does the robot believe it. Its own eyes (the camera) and its own body (the bumper) are trusted more than the laser.</p></div>
+
+<h2>6.2 Two questions, two layers</h2>
+<p>The map answers "<i>can I drive there?</i>". But a search-and-rescue robot must also answer "<i>has anyone looked there for people?</i>" Only a camera can answer
+the second question, because the laser cannot recognise a person. So every robot keeps a second layer, <b>searched</b>: the cells a camera (its own or a teammate's)
+has seen. The laser usually maps much further than the cameras have searched, so the difference is large (grey areas in Figure 6.2).</p>
+<p>For exploration the robot uses a combined view (<code>explore_map</code>): a cell counts as FREE or OBSTACLE <i>only if it has also been searched</i>, and as UNKNOWN
+otherwise. In effect, "unknown" means "still to be searched for people". That includes obstacles only the laser has seen, because a rubble heap the laser bounced off may
+have a person lying behind or under it.</p>
+
+<h2>6.3 Frontiers: the edge of what has been searched</h2>
+<p>A <b>frontier cell</b> is a searched free cell next to (up, down, left or right) a cell nobody has searched yet. It is the boundary between known and unknown.
+Driving to a frontier and looking around is guaranteed to reveal something new. This is the idea behind <b>frontier-based exploration</b> (Yamauchi, 1997), the most
+widely used autonomous exploration method.</p>
+<div class="two">
+<figure style="margin-top:0">
+<svg viewBox="0 0 300 200" width="300">
+  <g stroke="#fff" stroke-width="1.5">
+  <rect x="10" y="10" width="280" height="180" fill="#1e2029"/>
+  <path d="M10 10h160v180h-160z" fill="#eceef1"/>
+  </g>
+  <g fill="#2cc3cc"><rect x="150" y="10" width="20" height="60"/><rect x="150" y="110" width="20" height="80"/></g>
+  <rect x="150" y="70" width="20" height="40" fill="#6c4fd8"/>
+  <g stroke="#c5ccd6" stroke-width="0.6"><path d="M30 10V190M50 10V190M70 10V190M90 10V190M110 10V190M130 10V190M150 10V190M170 10V190M190 10V190M210 10V190M230 10V190M250 10V190M270 10V190M10 30H290M10 50H290M10 70H290M10 90H290M10 110H290M10 130H290M10 150H290M10 170H290"/></g>
+  <circle cx="60" cy="100" r="8" fill="#e8702a"/>
+  <text x="85" y="104" class="d-ts">robot</text>
+  <text x="230" y="104" text-anchor="middle" fill="#fff" class="d-ts">not searched</text>
+  <text x="90" y="30" text-anchor="middle" class="d-ts">searched, free</text>
+</svg>
+<figcaption><b>Figure 6.1</b> Frontier cells (cyan) lie between searched floor and unsearched space. The violet cell is an obstacle, so it is not a frontier. This long frontier
+would be cut into pieces of about 10 cells, each one a possible goal.</figcaption>
+</figure>
+<div>
+<p>Frontier cells are grouped into <b>clusters</b> (connected 8-way, <code>scipy.ndimage.label</code>). A long cluster, say a whole wall of an unexplored hall, is
+cut into <b>pieces of about 10 cells</b> along its main direction (found with an SVD, the direction in which the cells spread most). Then several robots can work along
+one big opening. Each piece becomes one possible goal:</p>
+<ul>
+<li><b>goal cell</b>: the reachable cell of the piece closest to its centre (the exact centre may be unreachable);</li>
+<li><b>value</b>: the number of frontier cells in the piece, a proxy for how much new area it should reveal;</li>
+<li><b>distance</b>: the route length from the robot (from its distance field, chapter 8).</li>
+</ul>
+</div>
+</div>
+
+<figure><img src="img/map_growth.png">
+<figcaption><b>Figure 6.2</b> The team map of three robots in an office at 3 s, 30 s and 90 s. The LiDAR maps quickly (grey = mapped but not yet searched); the cameras
+follow (white = searched). Cyan frontiers mark where searching should continue. By 90 s the robots are spreading into the rooms along the top and bottom.</figcaption></figure>
+
+<h2>6.4 Sharing maps without double counting</h2>
+<p>Robots that can talk by radio merge their maps every second. Merging must not simply add the evidence: if robot A told robot B about a wall yesterday, and B tells A
+today, adding would count the same observation twice and make the map over-confident. So the merge keeps, for every cell, the <b>strongest single opinion</b>
+(the evidence with the largest |L|), and any cell someone proved solid stays an obstacle. The searched layers are merged with a logical OR, and so are the
+"given up" cells (next section).</p>
+
+<h2>6.5 When the sensors cannot resolve a cell</h2>
+<p>Sometimes a robot stands on a frontier and still cannot tell what is in the cell next to it: a table top blocks the laser, a door frame makes the laser call a
+passable cell an obstacle, the camera cannot see into a corner. Then the robot <b>probes</b>: it drives slowly into that cell. Either it gets in (the cell is free;
+a robot knows the floor it stands on) or the bumper stops it (an obstacle, now proven). A cell still unresolved after one probe is <b>given up</b>: it no longer counts
+as a frontier, and the team shares that decision. This guarantees the search always ends.</p>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/mapping.py</code>: <code>apply_lidar</code>, <code>apply_camera</code>, <code>classify</code> (evidence → FREE/OBSTACLE/UNKNOWN), <code>merge_evidence</code>
+(strongest opinion), <code>explore_map</code> (the searched view), <code>frontiers</code> (frontier clusters). <code>rescue/coordination.py</code>: <code>_pieces</code>
+(cutting frontiers with an SVD) and <code>robot_goals</code>. Probing: <code>Simulator._probe</code>.</p></div>

@@ -67,8 +67,9 @@ function renderKpis() {
   } else {
     $("k-found").textContent = known ? `${rep.real} / ${world.config.n_victims}` : `${rep.real}`;
     $("k-found-sub").textContent = known ? "victims found" : "victims found (total unknown)";
-    $("k-false").hidden = !rep.false;
-    $("k-false").textContent = `+ ${plural(rep.false, "false alarm")}`;
+    $("k-false").hidden = !rep.false && !rep.twice;
+    $("k-false").textContent = [rep.false ? `+ ${plural(rep.false, "false alarm")}` : "", rep.twice ? `+ ${rep.twice} counted twice` : ""]
+      .filter(Boolean).join(" ");
   }
   const noCam = "You chose LiDAR under Sensors on the robots: this team carries a laser and no camera. " +
                 "A laser measures distances; it cannot recognise people. Choose Combined or Vision + Thermal to search for victims.";
@@ -94,7 +95,8 @@ function renderBanner() {
             `Choose <b>Combined</b> or <b>Vision + Thermal</b> under <i>Sensors on the robots</i> to search for victims.`;
   } else {
     html += `${Math.round(100 * m.coverage)}% of the reachable building searched · the robots reported ${rep.confirmed} ${rep.confirmed === 1 ? "person" : "people"}: ` +
-            `<b>${rep.real}</b> real victim${rep.real === 1 ? "" : "s"}` + (rep.false ? ` and ${plural(rep.false, "false alarm")}` : "");
+            `<b>${rep.real}</b> real victim${rep.real === 1 ? "" : "s"}` + (rep.false ? ` and ${plural(rep.false, "false alarm")}` : "") +
+            (rep.twice ? ` (and ${rep.twice} ${rep.twice === 1 ? "person" : "people"} counted twice)` : "");
     if (cfg.victims_known) html += (rep.real >= cfg.n_victims ? " · all expected victims accounted for" : ` · ${cfg.n_victims - rep.real} still missing`) +
                                    (state.truth_summary ? `<br>${esc(state.truth_summary)}` : "");
     else if (!state.revealed) html += `<br><button id="revealBtn">Reveal how many people were really inside (simulation only)</button>`;
@@ -120,7 +122,8 @@ function renderVictims() {
     : "Nobody knows how many people are inside, so only victims the robots have found are listed. Click one to fly there.";
   $("reportSum").hidden = !world.has_cameras;
   $("reportSum").innerHTML = `<span><b>${rep.confirmed}</b>confirmed by the robots</span><span class="real"><b>${rep.real}</b>real</span>` +
-    `<span class="false"><b>${rep.false}</b>false</span><span class="open"><b>${rep.suspected}</b>being checked</span>`;
+    `<span class="false"><b>${rep.false}</b>false</span>` + (rep.twice ? `<span class="false"><b>${rep.twice}</b>counted twice</span>` : "") +
+    `<span class="open"><b>${rep.suspected}</b>being checked</span>`;
   $("repeatNote").hidden = !rep.repeats;
   $("repeatNote").textContent = `${plural(rep.repeats, "repeated report")} of a person already on the list ${rep.repeats === 1 ? "was" : "were"} merged ` +
     `(head and legs of one body can look like two warm shapes).`;
@@ -139,7 +142,8 @@ function renderVictims() {
   $("falseTitle").textContent = `${plural(wrong.length, "false alarm")}`;
   $("falseList").innerHTML = wrong.map((c, i) => {
     const temp = c.temp != null ? ` · measured ${Math.round(c.temp)} °C` : "";
-    return `<div class="frow" data-i="${i}"><i>✕</i><div><div class="name">Really ${esc(c.truth.text)}</div>
+    const what = c.truth.kind === "duplicate" ? "Counted twice: " + esc(c.truth.text) : "Really " + esc(c.truth.text);
+    return `<div class="frow" data-i="${i}"><i>✕</i><div><div class="name">${what}</div>
             <div class="sub">at (${c.x.toFixed(1)}, ${c.y.toFixed(1)}) m · confirmed at ${c.confirmed_at} s by R${c.by.join(", R")}${temp}</div></div></div>`;
   }).join("");
   document.querySelectorAll(".frow").forEach(el => el.onclick = () => { const c = wrong[+el.dataset.i]; lookAt(c.x, c.y); });
@@ -148,16 +152,21 @@ function renderVictims() {
 function renderRobots() {
   const { world, state } = store;
   $("robotList").innerHTML = state.robots.map((r, i) => {
-    const zone = world.config.strategy === "partition" ? `zone Z${r.zone}` : `${r.distance} m driven`;
+    const zone = world.config.strategy === "partition" || r.sweep ? `zone Z${r.zone} · ${r.distance} m` : `${r.distance} m driven`;
+    const sw = r.sweep;
+    const sweep = !sw ? "" : `<div class="nav">${sw.pattern === "spiral" ? "Spiral" : "Lawnmower"}: ${esc(sw.describe)} · ` +
+      (sw.finished_at != null ? `finished at ${sw.finished_at} s` : `waypoint ${Math.min(sw.index + 1, sw.total)} of ${sw.total}`) +
+      ` · ${sw.reached} reached · ${sw.skipped.length} skipped</div>`;
     const p = r.plan;
     const route = p ? `${PLANNER_NAMES[p.algorithm] || p.algorithm} route ${p.length_m} m · ${p.work} ${p.algorithm === "rrtstar" ? "samples" : p.algorithm === "aco" ? "ant steps" : "cells expanded"} · ${p.ms} ms` +
                       (p.note ? ` · <span class="warn">${esc(p.note)}</span>` : "") : "no route planned yet";
-    const bat = r.battery == null ? "" : `<span class="batt${r.battery < 0.2 ? " low" : ""}"><i style="width:${Math.round(100 * r.battery)}%"></i></span>${Math.round(100 * r.battery)}%`;
+    const bat = r.battery == null ? "" : `<span class="batt${r.battery < 0.2 ? " low" : ""}"><i style="width:${Math.round(100 * r.battery)}%"></i></span>` +
+      `${Math.round(100 * r.battery)}% of ${r.capacity_wh} Wh` + (r.charges ? ` · charged ${r.charges}× (${r.charge_s} s)` : "");
     const repeat = r.moves ? Math.round(100 * r.repeat_moves / r.moves) : 0;
     return `<div class="rrow${i === store.selected ? " sel" : ""}" data-i="${i}" style="--c:${robotColor(i)}">
       <div class="top">R${r.id} · ${STATE_TEXT[r.state] || r.state}<span>${zone}</span></div>
       <div class="why">${esc(r.reason || "")}</div>
-      <div class="nav">${route}</div>
+      ${sweep}<div class="nav">${route}</div>
       <div class="nav">${r.energy_wh} Wh used ${bat} · ${repeat}% of moves over cells I had crossed · ${r.replans} replans · ${r.deadends} dead ends · ${r.conflicts} waits</div></div>`;
   }).join("");
   document.querySelectorAll(".rrow").forEach(el => el.onclick = () => selectRobot(+el.dataset.i));
@@ -189,7 +198,8 @@ function renderStats() {
   const rows = [
     [cams ? rep.confirmed : "–", "locations confirmed by the robots"],
     [cams ? rep.real : "–", "of them real victims"],
-    [cams ? rep.false : "–", "of them false alarms", rep.false > 0],
+    [cams ? rep.false : "–", "of them false alarms (nobody there)", rep.false > 0],
+    [cams ? rep.twice : "–", "of them a person counted twice", rep.twice > 0],
     [cams && rep.confirmed ? Math.round(100 * rep.real / rep.confirmed) + "%" : "–", "confirmed reports that were real people"],
     [fmtS(m.time_first_victim), "first victim found at"],
     [fmtS(m.time_last_find), "latest victim found at"],

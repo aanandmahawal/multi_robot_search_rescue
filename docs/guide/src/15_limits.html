@@ -1,0 +1,41 @@
+<h1><span class="num">15</span>Honest limitations</h1>
+<p class="lead">Every simulation simplifies. Knowing exactly where this one does, and what a real system would need instead, is a sign of understanding, and interviewers
+often ask. Here is the complete list.</p>
+
+<table>
+<tr><th style="width:24%">Simplification</th><th style="width:38%">What the project does</th><th>What a real robot would need</th></tr>
+<tr><td><b>Localisation</b></td><td>each robot knows its exact cell</td><td>SLAM or localisation: wheel odometry + IMU + scan matching (e.g. Cartographer, SLAM Toolbox), with position uncertainty in every map update</td></tr>
+<tr><td><b>Grid motion</b></td><td>point robot moving between 0.5 m cells, turn-then-drive timing</td><td>a footprint, obstacle inflation by the robot's radius, a velocity controller (pure pursuit, MPC), acceleration limits, slip on rubble</td></tr>
+<tr><td><b>2.5-D world, one floor</b></td><td>a heightfield: nothing overhangs, no stairs</td><td>3-D maps (voxels, OctoMap), traversability of slopes and debris, multi-floor navigation</td></tr>
+<tr><td><b>Sensors</b></td><td>ray-cast LiDAR and camera with noise, dropout, haze, blur and drift</td><td>reflective and transparent surfaces, dust storms, motion blur, rolling shutter, calibration between sensors</td></tr>
+<tr><td><b>Thermal physics</b></td><td>assigned surface temperatures, exponential heat leak through rubble</td><td>emissivity and reflections, heat conduction over time, thermal crossover at different times of day, radiometric calibration</td></tr>
+<tr><td><b>Detector training</b></td><td>trained only on simulator images (the network has never seen a real photo)</td><td>real or domain-randomised data; sim-to-real transfer is a research problem in itself</td></tr>
+<tr><td><b>Victims</b></td><td>lie still, 1.75 m bodies, no sound, no movement</td><td>moving or calling people (motion and audio cues), children, different postures</td></tr>
+<tr><td><b>Communication</b></td><td>unlimited on the dashboard; a simple range model with walls (35 %) on the command line</td><td>packet loss, bandwidth limits, mesh relaying, map compression</td></tr>
+<tr><td><b>Coordination</b></td><td>the auction is computed centrally, each second, for robots that are deciding</td><td>distributed bidding with messages and delays (e.g. a market-based protocol), robustness to lost robots</td></tr>
+<tr><td><b>Batteries</b></td><td>tiny capacities so that they matter on a 28 × 20 m floor; perfect charge measurement; a 60 W charger at the base</td><td>realistic packs (hundreds of Wh), voltage sag, temperature effects, docking manoeuvres</td></tr>
+<tr><td><b>Dynamic world</b></td><td>the building does not change during a mission</td><td>aftershocks, secondary collapse, moving rescuers: maps must forget old evidence</td></tr>
+</table>
+
+<div class="box simple"><b>Why these simplifications are reasonable</b>
+<p>The project studies <i>decisions</i>: how to explore, how to split work, how to plan and recover, how to turn noisy detections into reliable reports. Each simplification removes
+a problem that has its own large literature (SLAM, motion control, sim-to-real) without changing the decision logic that sits on top of it. A useful sentence for an interview is:
+"The navigation and coordination logic would run unchanged on top of a real localisation and control stack; what would change is where the map and the pose come from."</p></div>
+
+<h2>15.1 What is deliberately realistic</h2>
+<ul>
+<li>Robots know nothing about the inside of the building: they discover it with their own noisy sensors.</li>
+<li>The LiDAR is blind below its scan plane, and the camera is blocked by tall furniture. Both limits shape the search.</li>
+<li>Some victims cannot be found by any camera (thick rubble), and some look-alikes fool each sensor. Results report both instead of hiding them.</li>
+<li>Every move costs time according to its length and turn, and energy according to a physical model.</li>
+<li>Every result is checked against the ground truth on missions not used for tuning.</li>
+</ul>
+
+<h2>15.2 Natural next steps</h2>
+<ol>
+<li>Add pose noise and a simple scan-matching localiser, and measure how map quality and search time degrade.</li>
+<li>Replace the central auction with message-based bidding and a lossy radio.</li>
+<li>Add a sound sensor (calling victims) and fuse it with the thermal evidence in the belief filter.</li>
+<li>Inflate obstacles by the robot's radius and follow routes with pure pursuit, for continuous motion.</li>
+<li>Train the detector with domain randomisation, then test it on real thermal images.</li>
+</ol>

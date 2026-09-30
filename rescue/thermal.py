@@ -33,7 +33,8 @@ from .world import BUILDINGS, FINE, OBJ_WALL, World, _try_place
 THERMAL_BASE = 200          # object id of warm object m in the fine grid = THERMAL_BASE + m
 
 # ambient temperature per building (°C) and how much collapsed walls cool it down
-AMBIENT = {"office": 20.0, "apartments": 21.0, "hospital": 22.0, "school": 19.0, "parking": 13.0, "warehouse": 15.0}
+AMBIENT = {"office": 20.0, "apartments": 21.0, "hospital": 22.0, "school": 19.0, "parking": 13.0, "warehouse": 15.0,
+           "plain": 20.0}
 COLLAPSE_COOLING = {"light": 0.5, "moderate": 1.5, "severe": 3.0}
 
 # human surface temperatures as a thermal camera sees them (°C)
@@ -130,7 +131,7 @@ def _place_warm_objects(world: World, rng, temp) -> None:
     kinds = [k for k, spec in WARM_OBJECTS.items() if building in spec[5]]
     keep_from = [(v.x, v.y) for v in world.victims]
     f = cfg.cell / FINE
-    for j in range(cfg.n_warm_objects):
+    for j in range(0 if building == "plain" else cfg.n_warm_objects):   # the test ground has no warm look-alikes
         kind = kinds[j % len(kinds)]
         L, Wd, h, col, (t_lo, t_hi), _, blocks = WARM_OBJECTS[kind]
         placed = _try_place(world, rng, L, Wd, keep_from=keep_from, min_gap=2.0)

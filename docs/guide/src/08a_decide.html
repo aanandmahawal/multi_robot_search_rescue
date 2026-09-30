@@ -1,0 +1,104 @@
+<h1><span class="num">8</span>Deciding where to go</h1>
+<p class="lead">This chapter answers the question you asked most directly: <i>how does a robot in an unknown building choose its next target, and how do coverage
+patterns, team strategies and route planners fit together?</i> The short answer: decisions are made in <b>layers</b>, and each layer answers one question.</p>
+
+<h2>8.1 Goals: the robot's intermediate targets</h2>
+<p>A robot never plans "search the whole building". It always has exactly one <b>goal</b>: a cell to reach and a reason to reach it. Reaching goals one after another
+is how the whole building gets covered. There are eight kinds:</p>
+<table>
+<tr><th>Goal</th><th>What it means</th><th>Where it comes from</th></tr>
+<tr><td><b>frontier</b></td><td>drive to the edge of the searched area and look around (360° scan on arrival)</td><td>frontier pieces on the robot's map (chapter 6)</td></tr>
+<tr><td><b>sweep</b></td><td>the next waypoint of my lawnmower or spiral pattern</td><td>the robot's coverage pattern (8.4)</td></tr>
+<tr><td><b>verify</b></td><td>go 0.7–2.2 m from an uncertain sighting and take a close look</td><td>open candidates in the belief filter (7.5)</td></tr>
+<tr><td><b>home</b></td><td>return to the base: battery low, all known victims found, or nothing left</td><td>special rules (8.3)</td></tr>
+<tr><td><b>report</b></td><td>drive back into radio range to deliver a find (limited-radio missions)</td><td>special rules</td></tr>
+<tr><td><b>transit</b></td><td>partition strategy: head for my zone through unexplored space</td><td>the partition strategy</td></tr>
+<tr><td><b>probe</b></td><td>drive into a cell the sensors cannot resolve (bumper decides)</td><td>chapter 6.5, 10.5</td></tr>
+<tr><td><b>backtrack</b></td><td>back off along my own trail out of a dead end</td><td>dead-end recovery (10.6)</td></tr>
+</table>
+
+<h3>The distance field</h3>
+<p>To compare goals a robot must know how far each one is <i>by route</i>, not in a straight line (a room behind a wall may be 1 m away but 30 m to drive). So at each
+decision the robot runs <b>one Dijkstra search from its own cell to every cell</b> of its map (a "distance field", <code>mapping.dijkstra</code>). One search gives the route
+length to all goals at once, which is why goal selection always uses Dijkstra, whatever route planner is chosen. For pattern waypoints, which may lie in unmapped space, a
+second, <i>optimistic</i> field treats unknown cells as passable (the free-space assumption).</p>
+
+<h3>When does a robot decide?</h3>
+<p>Deciding is not free, and changing one's mind every second makes robots dither. A robot chooses a new goal only when:</p>
+<ul>
+<li>it has no goal, or has just reached it (and finished its scan or close look);</li>
+<li>its goal became invalid: the frontier cell was searched by a teammate, the sighting was confirmed or rejected, the waypoint turned out to be inside an obstacle;</li>
+<li>a new obstacle appeared on the next 20 cells of its route, or it has no route to its goal;</li>
+<li>its battery says it must go home;</li>
+<li>12 seconds have passed since its last decision (a periodic re-check, because the map keeps changing).</li>
+</ul>
+
+<h2>8.2 The decision hierarchy</h2>
+<figure>
+<svg viewBox="0 0 760 470" width="760">
+  <rect x="200" y="5" width="360" height="40" rx="7" class="d-grey"/><text x="380" y="30" text-anchor="middle" class="d-tb">robot needs a goal (see "when does a robot decide?")</text>
+  <path d="M380 45 L380 62" class="d-arrow"/>
+  <rect x="150" y="64" width="460" height="58" rx="7" class="d-red"/><text x="380" y="85" text-anchor="middle" class="d-tb">1 · Special goals first (simulator._special_goal)</text>
+  <text x="380" y="103" text-anchor="middle" class="d-ts">battery only enough to get home? → home (and recharge) · all expected victims found? → home</text>
+  <text x="380" y="117" text-anchor="middle" class="d-ts">unreported find and out of radio range? → report</text>
+  <path d="M380 122 L380 140" class="d-arrow"/><text x="392" y="136" class="d-ts">none applies</text>
+  <rect x="150" y="142" width="460" height="72" rx="7" class="d-green"/><text x="380" y="163" text-anchor="middle" class="d-tb">2 · Coverage pattern (coordination._sweep) — lawnmower / spiral only</text>
+  <text x="380" y="181" text-anchor="middle" class="d-ts">a sighting within 6 m that no teammate is checking? → verify it</text>
+  <text x="380" y="196" text-anchor="middle" class="d-ts">else → next waypoint of MY pattern (skip ones inside obstacles / unreachable)</text>
+  <text x="380" y="210" text-anchor="middle" class="d-ts">battery cannot pay for it? → go and recharge, then continue here</text>
+  <path d="M380 214 L380 232" class="d-arrow"/><text x="392" y="228" class="d-ts">frontier mode, or my pattern is finished</text>
+  <rect x="150" y="234" width="460" height="72" rx="7" class="d-green"/><text x="380" y="255" text-anchor="middle" class="d-tb">3 · Team strategy over frontier + verify goals (coordination._choose_frontier)</text>
+  <text x="380" y="273" text-anchor="middle" class="d-ts">only goals the battery can pay for (there and back) are candidates</text>
+  <text x="380" y="288" text-anchor="middle" class="d-ts">random · greedy (nearest) · partition (my zone) · coordinated (auction)</text>
+  <text x="380" y="302" text-anchor="middle" class="d-ts">→ one goal per robot, with a reason in plain words</text>
+  <path d="M380 306 L380 324" class="d-arrow"/><text x="392" y="320" class="d-ts">still nothing</text>
+  <rect x="150" y="326" width="460" height="58" rx="7" class="d-grey"/><text x="380" y="347" text-anchor="middle" class="d-tb">4 · Fallbacks</text>
+  <text x="380" y="365" text-anchor="middle" class="d-ts">tasks left but battery too small → recharge · unsearched space sealed by laser-only obstacles →</text>
+  <text x="380" y="379" text-anchor="middle" class="d-ts">try the cheapest way through (breakthrough) · otherwise → home, "nothing left on my map"</text>
+  <path d="M380 384 L380 402" class="d-arrow-b"/>
+  <rect x="150" y="404" width="460" height="58" rx="7" class="d-box"/><text x="380" y="425" text-anchor="middle" class="d-tb">5 · Route planner (simulator._route → planners.plan)</text>
+  <text x="380" y="443" text-anchor="middle" class="d-ts">Dijkstra / A* / RRT* / ant colony: the cell-by-cell route to the chosen goal</text>
+  <text x="380" y="457" text-anchor="middle" class="d-ts">(unknown cells count as free for pattern waypoints; replanned when the map changes)</text>
+  <rect x="632" y="142" width="122" height="164" rx="7" fill="#fff" stroke="#b9c3cf"/>
+  <text x="693" y="164" text-anchor="middle" class="d-tb">answers</text>
+  <text x="693" y="188" text-anchor="middle" class="d-ts">pattern:</text><text x="693" y="202" text-anchor="middle" class="d-t">WHERE next?</text>
+  <text x="693" y="232" text-anchor="middle" class="d-ts">strategy:</text><text x="693" y="246" text-anchor="middle" class="d-t">WHO goes where?</text>
+  <text x="693" y="276" text-anchor="middle" class="d-ts">planner:</text><text x="693" y="290" text-anchor="middle" class="d-t">HOW to get there?</text>
+</svg>
+<figcaption><b>Figure 8.1</b> How one goal is chosen. The layers are tried top to bottom. The first layer that produces a goal wins, and the route planner then turns that goal into
+a route. This is <code>Simulator._decide</code>, which calls <code>coordination.choose</code>.</figcaption>
+</figure>
+
+<div class="box simple"><b>In simple words</b>
+<p>First the robot asks "is there an emergency?" (battery, all found, news to deliver). If not, it asks its <b>coverage pattern</b> what to do next. With frontier
+exploration there is no fixed pattern, so it goes straight to the <b>team strategy</b>, which picks among the frontiers and sightings while taking teammates into
+account. Whatever is chosen, the <b>route planner</b> then works out the path. Finally the motion layer drives it, one cell at a time (chapter 10).</p></div>
+
+<h2>8.3 A robot's life: the state machine</h2>
+<figure>
+<svg viewBox="0 0 760 250" width="760">
+  <g font-size="11">
+  <rect x="20" y="95" width="90" height="40" rx="18" class="d-grey"/><text x="65" y="120" text-anchor="middle" class="d-tb">idle</text>
+  <rect x="170" y="20" width="110" height="40" rx="18" class="d-green"/><text x="225" y="45" text-anchor="middle" class="d-tb">exploring</text>
+  <rect x="170" y="75" width="110" height="40" rx="18" class="d-green"/><text x="225" y="100" text-anchor="middle" class="d-tb">sweeping</text>
+  <rect x="170" y="130" width="110" height="40" rx="18" class="d-warm"/><text x="225" y="155" text-anchor="middle" class="d-tb">verifying trip</text>
+  <rect x="170" y="185" width="110" height="40" rx="18" class="d-red"/><text x="225" y="210" text-anchor="middle" class="d-tb">returning</text>
+  <rect x="350" y="20" width="110" height="40" rx="18" class="d-box"/><text x="405" y="45" text-anchor="middle" class="d-tb">scanning 360°</text>
+  <rect x="350" y="130" width="110" height="40" rx="18" class="d-warm"/><text x="405" y="155" text-anchor="middle" class="d-tb">verifying (look)</text>
+  <rect x="350" y="185" width="110" height="40" rx="18" class="d-violet"/><text x="405" y="210" text-anchor="middle" class="d-tb">charging</text>
+  <rect x="530" y="185" width="90" height="40" rx="18" class="d-grey"/><text x="575" y="210" text-anchor="middle" class="d-tb">done</text>
+  <rect x="530" y="75" width="120" height="40" rx="18" class="d-red"/><text x="590" y="100" text-anchor="middle" class="d-tb">backtracking</text>
+  <path d="M110 105 L168 42M110 112 L168 95M110 120 L168 148M110 128 L168 200" class="d-arrow"/>
+  <path d="M280 40 L348 40" class="d-arrow"/><text x="314" y="33" text-anchor="middle" class="d-ts">arrived</text>
+  <path d="M280 150 L348 150" class="d-arrow"/><text x="314" y="143" text-anchor="middle" class="d-ts">arrived</text>
+  <path d="M280 205 L348 205" class="d-arrow"/><text x="314" y="198" text-anchor="middle" class="d-ts">low battery</text>
+  <path d="M460 205 L528 205" class="d-dash"/><text x="494" y="198" text-anchor="middle" class="d-ts">nothing left</text>
+  <path d="M405 60 C405 75 120 70 90 93" class="d-dash"/><text x="300" y="72" class="d-ts">3 s later</text>
+  <path d="M405 130 C390 118 130 120 105 128" class="d-dash"/>
+  <path d="M405 225 C405 245 60 245 60 137" class="d-dash"/><text x="230" y="243" text-anchor="middle" class="d-ts">full: back to work (continues its pattern)</text>
+  <path d="M280 85 L528 92" class="d-dash"/><text x="440" y="82" class="d-ts">loop / blocked 8 s</text>
+  </g>
+</svg>
+<figcaption><b>Figure 8.2</b> The states a robot moves through (<code>RobotAgent.state</code>). Solid arrows: choosing a goal of that kind. Dashed: what happens after. The dashboard's Robots tab
+shows each robot's state and its reason, e.g. "following waypoint 12 of 68 of my spiral, 3.5 m away".</figcaption>
+</figure>

@@ -7,14 +7,36 @@ import { $ } from "./util.js";
 
 const SELECTS = ["building", "damage", "strategy", "planner", "coverage", "avoidance", "battery"];
 const SLIDERS = ["robots", "victims", "rspeed", "camrange", "lidarrange", "density"];
-const SEGS = [["knownSeg", "known"], ["varySeg", "vary"], ["revisitSeg", "revisit"], ["deadendSeg", "deadend"]];
+const SEGS = [["knownSeg", "known"], ["varySeg", "vary"], ["revisitSeg", "revisit"], ["deadendSeg", "deadend"], ["rechargeSeg", "recharge"]];
+const EACH_WH = ["0", "10", "5", "3", "2", "1.5", "1"];      // choices for one robot's battery ("0" = unlimited)
+
+// Battery = "Different per robot": one small choice per robot
+function batteryEachList() {
+  const n = +$("robots").value;
+  while (store.batteryEach.length < n) store.batteryEach.push(["3", "2", "1.5", "1"][store.batteryEach.length % 4]);
+  return store.batteryEach.slice(0, n);
+}
+
+let onBatteryChange = () => {};
+function renderBatteryEach(onChange = onBatteryChange) {
+  const box = $("batteryEach"), each = $("battery").value === "each";
+  box.hidden = !each;
+  $("rechargeRow").hidden = $("battery").value === "0";
+  if (!each) return;
+  box.innerHTML = batteryEachList().map((v, i) => `<label>R${i}<select data-i="${i}">` +
+    EACH_WH.map(w => `<option value="${w}"${w === v ? " selected" : ""}>${w === "0" ? "∞" : w + " Wh"}</option>`).join("") +
+    `</select></label>`).join("");
+  box.querySelectorAll("select").forEach(s => s.onchange = () => { store.batteryEach[+s.dataset.i] = s.value; onChange(); });
+}
 
 // the settings of the next mission, as the server wants them
 export const missionParams = () => ({
   building: $("building").value, damage: $("damage").value, strategy: $("strategy").value, sensors: store.sensors,
   robots: $("robots").value, victims: $("victims").value, known: store.known, seed: store.seed,
   planner: $("planner").value, coverage: $("coverage").value, avoidance: $("avoidance").value,
-  speed: $("rspeed").value, battery: $("battery").value, camrange: $("camrange").value, lidarrange: $("lidarrange").value,
+  speed: $("rspeed").value, battery: $("battery").value === "each" ? 0 : $("battery").value, recharge: store.recharge,
+  ...($("battery").value === "each" ? { battery_each: batteryEachList().join(",") } : {}),
+  camrange: $("camrange").value, lidarrange: $("lidarrange").value,
   density: $("density").value, revisit: store.revisit, deadend: store.deadend,
   // "Vary each run": new random numbers for every run in the same building
   ...(store.vary === "1" ? { run: Math.floor(Math.random() * 1e6) } : {}),
@@ -30,6 +52,8 @@ export function refreshHints() {
   $("hint-vary").textContent = EXPLAIN.vary[store.vary];
   $("hint-planner").textContent = EXPLAIN.planner[$("planner").value];
   $("hint-coverage").textContent = EXPLAIN.coverage[$("coverage").value];
+  $("hint-recharge").textContent = EXPLAIN.recharge[store.recharge];
+  renderBatteryEach();
   $("hint-avoidance").textContent = EXPLAIN.avoidance[$("avoidance").value];
   $("hint-revisit").textContent = EXPLAIN.revisit[store.revisit];
   $("hint-deadend").textContent = EXPLAIN.deadend[store.deadend];
@@ -102,6 +126,11 @@ export function initControls(h) {
   for (const id of ["building", "damage", "density"]) $(id).addEventListener("change", () => changed(true));
   for (const id of ["strategy", "planner", "coverage", "avoidance", "battery", "robots", "victims", "rspeed", "camrange", "lidarrange"])
     $(id).addEventListener("change", () => changed(false));
+  onBatteryChange = () => changed(false);
+  const battery = () => renderBatteryEach();
+  $("battery").addEventListener("change", battery);
+  $("robots").addEventListener("change", battery);
+  battery();
   for (const [seg, key] of SEGS.slice(1))
     document.querySelectorAll(`#${seg} button`).forEach(b => b.onclick = () => { setSeg(key, b.dataset[key]); changed(false); });
   for (const id of SLIDERS) $(id).addEventListener("input", refreshHints);
@@ -173,6 +202,8 @@ function applyPresets() {
   if (q.has("vary")) store.vary = q.get("vary") === "1" ? "1" : "0";
   if (q.has("revisit")) store.revisit = q.get("revisit") === "0" ? "0" : "0.3";
   if (q.has("deadend")) store.deadend = q.get("deadend") === "0" ? "0" : "1";
+  if (q.has("recharge")) store.recharge = q.get("recharge") === "0" ? "0" : "1";
+  if (q.has("battery_each")) { $("battery").value = "each"; store.batteryEach = q.get("battery_each").split(","); }
   if (q.has("seed")) store.seed = +q.get("seed");
   if (q.has("view")) store.viewMode = q.get("view");
   if (VIEWS.some(v => v.key === q.get("show"))) store.viewAs = q.get("show");

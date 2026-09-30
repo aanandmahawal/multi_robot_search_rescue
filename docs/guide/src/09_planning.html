@@ -1,0 +1,118 @@
+<h1><span class="num">9</span>Route planning</h1>
+<p class="lead">Once a goal is chosen, the robot needs a route: a chain of neighbouring free cells from where it stands to the goal. The project implements four
+planners that obey exactly the same rules (free cells only, 8 moves, straight 1 / diagonal 1.4142, no corner cutting), so their routes can be compared fairly.</p>
+
+<h2>9.1 The map as a graph</h2>
+<p>A planner sees the map as a <b>graph</b>: every free cell is a <i>node</i>, and every allowed move to a neighbour is an <i>edge</i> with a cost (1 or 1.4142, plus an
+optional extra cost per cell such as the revisit penalty of chapter 10). Finding the cheapest route is then the classic <b>shortest-path problem</b>.</p>
+
+<h2>9.2 Dijkstra (1959)</h2>
+<p>Dijkstra's algorithm grows the set of cells whose shortest distance is known, always taking the closest unfinished cell next. It uses a <b>priority queue</b>
+(a heap) ordered by g, the cost from the start:</p>
+<pre>g[start] = 0;  every other g = ∞;  heap = [(0, start)]
+while heap not empty:
+    (g_c, c) = pop the entry with the smallest g           # c's distance is now final
+    if c is the goal: stop, and follow parent[] links back to the start
+    for each allowed move c → n with cost k:
+        if g_c + k &lt; g[n]:  g[n] = g_c + k;  parent[n] = c;  push (g[n], n)</pre>
+
+<div class="two">
+<figure style="margin-top:0">
+<svg viewBox="0 0 320 225" width="320">
+  <g font-size="11" text-anchor="middle">
+  <g stroke="#b9c3cf" fill="#fbfcfd">
+  <rect x="10" y="10" width="300" height="200"/></g>
+  <rect x="160" y="10" width="50" height="150" fill="#3d4450"/>
+  <g stroke="#c5ccd6"><path d="M60 10V210M110 10V210M160 10V210M210 10V210M260 10V210M10 60H310M10 110H310M10 160H310"/></g>
+  <g fill="#1d2733">
+  <text x="35" y="40">0</text><text x="85" y="40">1</text><text x="135" y="40">2</text><text x="235" y="40">8.83</text><text x="285" y="40">9.24</text>
+  <text x="35" y="90">1</text><text x="85" y="90">1.41</text><text x="135" y="90">2.41</text><text x="235" y="90">7.83</text><text x="285" y="90">8.24</text>
+  <text x="35" y="140">2</text><text x="85" y="140">2.41</text><text x="135" y="140">2.83</text><text x="235" y="140">6.83</text><text x="285" y="140">7.24</text>
+  <text x="35" y="190">3</text><text x="85" y="190">3.41</text><text x="135" y="190">3.83</text><text x="185" y="190">4.83</text><text x="235" y="190">5.83</text><text x="285" y="190">6.83</text>
+  </g>
+  <path d="M35 35 L85 85 L135 135 L135 185 L185 185 L235 185 L235 135 L235 85 L285 35" stroke="#c0392b" stroke-width="2.5" fill="none" opacity="0.75"/>
+  <circle cx="35" cy="35" r="6" fill="#27ae60"/><text x="285" y="26" fill="#c0392b" font-weight="700">goal</text>
+  <text x="185" y="90" fill="#fff">wall</text>
+  </g>
+</svg>
+<figcaption><b>Figure 9.1</b> Dijkstra's distances (in cells) from the green start, computed by the project's own <code>dijkstra</code>. The route (red) goes round the wall.
+At (2,2) it cannot cut diagonally to (3,3), because (3,2) is wall, so it steps down first. Route cost 9.24 cells = 4.6 m.</figcaption>
+</figure>
+<div>
+<p><b>Why it is correct</b>: all step costs are positive, so when a cell is popped with the smallest g, no later path can reach it more cheaply. Its distance is final.
+Dijkstra therefore always returns the <b>optimal</b> route.</p>
+<p><b>Cost</b>: with a binary heap, O((V + E) log V). On a grid each cell has at most 8 edges, so this is about O(V log V) for V cells. For the 2,240-cell floor that is a few
+milliseconds.</p>
+<p><b>Why the project uses it twice</b>: to <i>choose</i> a goal, the robot needs the route distance to <i>every</i> candidate. One Dijkstra run from the robot, without a goal,
+gives exactly that (the "distance field"). With the Dijkstra planner selected, the route to the chosen goal is simply read back from that same field, so no second search is needed.</p>
+</div>
+</div>
+
+<h2>9.3 A* (Hart, Nilsson & Raphael, 1968)</h2>
+<p>A* is Dijkstra with a sense of direction. It orders the queue by f = g + h, where h(n) is an <b>estimate of the remaining cost</b> to the goal. The project uses the
+<b>octile distance</b>, the exact cost on an empty 8-connected grid:</p>
+<div class="eq">h(n) = max(dx, dy) + (√2 − 1) · min(dx, dy)</div>
+<p>This h is <b>admissible</b> (it never overestimates, because walls can only make routes longer) and <b>consistent</b> (it never drops by more than the cost of one step).
+Those two properties guarantee that A* returns the <b>same optimal route length</b> as Dijkstra while expanding far fewer cells, because it stops wasting effort on cells that
+lead away from the goal. Ties on f are broken in favour of the larger g (the deeper node), which reaches the goal sooner. In Figure 9.1, A* expands 16 cells against Dijkstra's
+21. On 40 random routes on the test ground it expands 87 cells on average against 974, 1.1 ms against 9 ms.</p>
+
+<div class="box simple"><b>In simple words</b>
+<p>Dijkstra spreads out like a ripple in a pond until it touches the goal. A* is a ripple that is pulled towards the goal: it still checks every place that <i>could</i> be on a
+shortest route, but ignores places that obviously are not.</p></div>
+
+<h2>9.4 RRT* (Karaman & Frazzoli, 2011)</h2>
+<p>Sampling-based planners do not search cell by cell. They grow a <b>tree of straight line segments</b> by throwing random points into the free space. That makes them the standard
+choice for robot arms and drones in continuous, high-dimensional spaces. The project's version combines three well-known improvements:</p>
+<ol>
+<li><b>Two trees</b> grow, one from the robot and one from the goal, and try to connect after every new point (the RRT-Connect idea, Kuffner & LaValle 2000).</li>
+<li><b>RRT* rules</b>: a new point is joined through whichever neighbour within radius r = γ·√(log n / n) gives it the cheapest cost from the root, and then nearby
+points are <b>rewired</b> through it if that shortens their cost. When a point gets cheaper, every point below it in the tree gets cheaper by the same amount, so the
+saving is propagated to its whole subtree. As samples grow, the tree's best route converges to the optimum.</li>
+<li><b>Informed sampling</b> (Gammell et al., 2014): once a route of cost c exists, new samples are drawn only inside the ellipse |p − start| + |p − goal| ≤ c. Only
+there can a shorter route lie.</li>
+</ol>
+<p>Every segment is checked against a fine collision mask (5 points per cell side, with a 0.3-cell safety margin at cell borders, so a line never squeezes diagonally between two
+obstacles). The final route is shortened along lines of sight, then drawn onto grid cells with <b>Bresenham's line algorithm</b>, whose 8-connected chain for a segment has
+exactly the octile length of that segment. If the route is not valid, or no route is found within 700 samples, the robot falls back to A* and the dashboard says so.</p>
+
+<h2>9.5 Ant Colony Optimisation (Dorigo, 1996)</h2>
+<p>Ants find short paths to food by laying <b>pheromone</b>: shorter paths are walked more often, collect more pheromone, and attract more ants. The planner imitates this
+with 10 virtual ants per round, for up to 12 rounds:</p>
+<ul>
+<li>At cell i, an ant picks the next cell j with probability ∝ τ<sub>j</sub><sup>α</sup> · η<sub>j</sub><sup>β</sup> (α = 1, β = 4), never revisiting a cell of its own walk
+and stepping back out of dead ends.</li>
+<li>τ<sub>j</sub> is the pheromone on j; η<sub>j</sub> = 1 / (1 + detour), where <b>detour = c(i, j) + h(j) − h(i) ≥ 0</b> is how much longer the move makes the best route still
+possible (h = octile distance). A move straight towards the goal has detour 0; a step backwards has up to 2√2.</li>
+<li>After each round the pheromone <b>evaporates</b> by ρ = 30 %, every ant that arrived lays Q/L on its path (Q = 10, L its length, so shorter paths lay more), and the best
+path so far is reinforced again (the <b>elitist</b> ant system). The colony stops when the best path has not improved for 3 rounds.</li>
+</ul>
+
+<div class="box warn"><b>Two corrections made during this project</b>
+<p>RRT* used to trace its lines onto the grid cell by cell, turning every slanted line into a staircase (10 right and 3 down cost 13 instead of 11.24), so its routes were 18 % too long.
+The ants' first heuristic, η = 1/(step + distance to goal), barely distinguished neighbouring cells far from the goal ((41/40)<sup>4</sup> ≈ 1.1), so the ants mostly wandered (25 % too long,
+370 ms). Both were fixed, and the numbers below are after the fix. It is a good story for an interview: measure against a known optimum, find the cause, fix it, measure again.</p></div>
+
+<figure><img src="img/planners.png">
+<figcaption><b>Figure 9.2</b> The four planners on the same route across an office, to the farthest reachable cell. Blue cells: what Dijkstra and A* examined (1,376 and 1,002 cells: A* leaves out areas that cannot lie on a shortest route).
+Blue lines: the two RRT* trees. Yellow: cells the ants left pheromone on. Dijkstra, A* and RRT* all find the optimal 38.1 m; this ant colony run settles on 46.3 m.</figcaption></figure>
+
+<table>
+<tr><th>Planner (40 random routes, open test ground)</th><th>Valid routes</th><th>Length ÷ optimum (mean, worst)</th><th>Work per route</th><th>Time</th></tr>
+<tr><td>Dijkstra</td><td>40 / 40</td><td>1.000, 1.000</td><td>974 cells expanded</td><td>9 ms</td></tr>
+<tr><td>A*</td><td>40 / 40</td><td>1.000, 1.000</td><td>87 cells expanded</td><td>1.1 ms</td></tr>
+<tr><td>RRT*</td><td>40 / 40</td><td>1.013, 1.085</td><td>116 samples</td><td>48 ms</td></tr>
+<tr><td>Ant colony</td><td>40 / 40</td><td>1.011, 1.089</td><td>1,842 ant steps</td><td>100 ms</td></tr>
+</table>
+<p class="small">Source: <code>python scripts/check_algorithms.py</code> → <code>results/algorithms/check.md</code>. In walled buildings RRT* and the ants do worse than in open space
+(narrow doors are hard to hit by chance), which is why the grid planners are the sensible default for this problem.</p>
+
+<div class="box tip"><b>Interview tip: "why Dijkstra and not A*?"</b>
+<p>Don't say one is "better". Say: "Both give the optimal route on this grid. A* is faster for one point-to-point route because its admissible octile heuristic focuses the search.
+But to choose a goal I need distances to many candidates, and one Dijkstra run from the robot gives all of them at once. With Dijkstra as the planner, the route comes free from the same
+search. RRT* and ant colony are there for comparison; they suit continuous spaces and changing costs better than a small grid."</p></div>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/planners.py</code>: <code>grid_search</code> (Dijkstra and A*, one function, heuristic on or off), <code>rrt_star</code> with <code>_extend</code>, <code>_propagate</code>,
+<code>_smooth</code>, <code>bresenham</code>, <code>_trace</code>; <code>ant_colony</code>; <code>plan</code> (one entry point, validation and A* fallback). <code>rescue/mapping.py</code>
+<code>dijkstra</code> is the distance field used for goal choice.</p></div>

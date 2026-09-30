@@ -284,21 +284,37 @@ def _rep(i, pos, x=5.0, y=5.0, p=0.9, d=1.5, temp=None):
 
 def test_close_confident_sightings_confirm():
     reg = Registry(RescueConfig())
-    for i in range(3):
-        reg.apply(_rep(i, True, x=5.0 + 0.1 * i, p=0.95, temp=30 + i))
-    assert reg.candidates[0].status == "candidate"          # 3 frames are not enough yet
-    reg.apply(_rep(3, True, x=5.2, p=0.95))
+    for i in range(5):
+        reg.apply(_rep(i, True, x=5.0 + 0.05 * i, p=0.95, temp=30 + i))
+    reg.settle(5)
+    assert reg.candidates[0].status == "candidate"          # 5 frames are not enough yet (6 needed)
+    reg.apply(_rep(5, True, x=5.2, p=0.95))
+    assert reg.candidates[0].status == "candidate"          # the verdict is only taken in settle()
+    assert [ch for _, ch in reg.settle(6)] == ["confirmed"]
     assert len(reg.candidates) == 1 and reg.candidates[0].status == "confirmed"
-    assert reg.candidates[0].temp == 32                     # warmest reading is kept
+    assert reg.candidates[0].temp == 34                     # warmest reading is kept
 
 
 def test_negative_looks_reject_false_alarm():
     reg = Registry(RescueConfig())
     reg.apply(_rep(0, True, p=0.65, d=4.0))
+    reg.settle(0)
     assert reg.candidates[0].status == "candidate"
     for i in range(1, 4):
         reg.apply(_rep(i, False, d=1.5))
+    reg.settle(4)
     assert reg.candidates[0].status == "rejected"
+
+
+def test_robots_that_share_their_reports_always_agree():
+    """With the radio reaching everyone, every robot holds the same sightings with the same verdict
+    at every second: one robot can never confirm what another rejected on the same evidence."""
+    sim = Simulator(replace(CFG, vision="thermal", n_robots=3, building="parking", seed=5))
+    for _ in range(160):
+        sim.step()
+        views = [[(round(c.x, 6), round(c.y, 6), c.status) for c in r.registry.candidates] for r in sim.robots]
+        assert all(v == views[0] for v in views)
+    assert any(c.status != "candidate" for c in sim.robots[0].registry.candidates)     # verdicts were taken
 
 
 def test_one_person_is_reported_once():
@@ -306,8 +322,9 @@ def test_one_person_is_reported_once():
     reg = Registry(RescueConfig())
     i = 0
     for x in (5.0, 6.5, 12.0):                              # 1.5 m apart (same body), then someone else
-        for _ in range(4):
+        for _ in range(6):
             reg.apply(Report(i, 10 * i, 0, True, x, 5.0, 0.95, 1.5)); i += 1
+    reg.settle(i)
     assert [c.status for c in reg.candidates] == ["confirmed"] * 3
     people = reg.people()
     assert len(people) == 2 and [round(c.x) for c in people] == [5, 12]        # the first report of a body is kept
@@ -480,18 +497,19 @@ def test_dashboard_hides_the_truth_until_revealed():
 
 @pytest.mark.skipif(not Path(RescueConfig().fusion_detector_path).exists(), reason="fusion detector not trained")
 def test_reports_on_the_dashboard_add_up():
-    """Confirmed by the robots = real victims + false alarms, the same numbers everywhere."""
+    """Confirmed by the robots = real victims + false alarms + people counted twice, the same numbers everywhere."""
     from rescue.server import Session
     s = Session(RescueConfig(vision="fusion", building="warehouse", seed=4, max_steps=400))
     s.sim.run()
     st = s.state_payload()
     rep, m = st["reports"], st["metrics"]
     confirmed = [c for c in st["candidates"] if c["status"] == "confirmed"]
-    assert rep["confirmed"] == len(confirmed) == rep["real"] + rep["false"]
+    assert rep["confirmed"] == len(confirmed) == rep["real"] + rep["false"] + rep["twice"]
     assert rep["repeats"] == m["repeated_reports"] and not any(c["status"] == "repeat" for c in st["candidates"])
     assert all(np.hypot(a["x"] - b["x"], a["y"] - b["y"]) >= SAME_PERSON for a in confirmed for b in confirmed if a is not b)
     assert rep["real"] == m["found"] == len([v for v in st["victim_status"] if v["status"] == "found"])
-    assert rep["false"] == m["false_alarms"] and m["confirmed_reports"] == rep["confirmed"]
+    assert rep["false"] + rep["twice"] == m["false_alarms"] and m["confirmed_reports"] == rep["confirmed"]
+    assert rep["twice"] == m["false_alarms_duplicate"]
     assert all(c["truth"]["text"] for c in confirmed) and all(c["truth"] is None for c in st["candidates"] if c["status"] == "candidate")
     assert all("not a person" in c["truth"]["text"] or "nothing there" in c["truth"]["text"] or "already counted" in c["truth"]["text"]
                for c in confirmed if not c["truth"]["real"])

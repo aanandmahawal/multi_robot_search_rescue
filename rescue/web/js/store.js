@@ -17,6 +17,8 @@ export const store = {
   vary: "0",            // "1" = every run draws new random numbers (same building, different paths)
   revisit: "0",         // route cost per earlier visit of a cell ("0" = shortest routes)
   deadend: "1",         // dead-end / loop recovery on
+  recharge: "1",        // "1" = a robot back on low battery recharges and goes out again
+  batteryEach: [],      // per-robot capacities (Wh) when Battery = "Different per robot"
   compareJob: null,     // the running algorithm comparison (Stats tab)
   seed: Math.floor(Math.random() * 100000),
   preset: {},           // extra settings given in the address bar (e.g. vision=ideal)

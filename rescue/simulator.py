@@ -8,7 +8,8 @@ One step = one second. Each step every robot:
   2. DETECT       its victim detector looks at the camera image(s); sightings become reports
                   (a "person" hotter than 40 °C is dropped: heaters and engines are not people)
   3. COMMUNICATE  robots within radio range merge their maps and victim reports
-  4. DECIDE       robots without a goal pick one (frontier to explore / sighting to verify)
+  4. DECIDE       robots without a goal pick one (the next waypoint of their coverage pattern /
+                  a frontier to explore / a sighting to verify)
   5. ACT          drive (turn on the spot, then drive at cfg.speed: see motion.py), spin to scan,
                   or turn to look at a sighting; every move and every second costs energy
 
@@ -26,11 +27,11 @@ import heapq
 import numpy as np
 
 from .config import RescueConfig
-from . import lidar
+from . import coverage, lidar
 from .coordination import Goal, choose, partition_regions, path_to
 from .mapping import (FREE, L_LIDAR_MAX, L_MAX, MOVES, OBSTACLE, UNKNOWN, apply_camera, apply_lidar, classify, dijkstra, explore_map, extract_path,
                       merge_evidence)
-from .motion import (BACKOFF, BLOCKED_STEPS, RESERVE, TABU_S, TRAIL_LEN, base_power, clearance_map, drive_energy_per_m,
+from .motion import (BACKOFF, BLOCKED_STEPS, RESERVE, SAFETY, TABU_S, TRAIL_LEN, base_power, clearance_map, drive_energy_per_m,
                      dwa_step, energy_home, move_time, rejoin, stuck_in_loop, turn_energy, wrap)
 from .planners import Plan, plan, route_length
 from .sensors import line_of_sight, render, visible_cells
@@ -47,6 +48,11 @@ MATCH_RADIUS = 1.5     # metres: a confirmed location this close to a real victi
 
 @dataclass
 class RobotAgent:
+    @property
+    def energy_used(self) -> float:
+        """Joules used over the whole mission (energy_j is only what the battery is down by now)."""
+        return self.energy_j + self.energy_charged
+
     id: int
     cell: tuple[int, int]
     heading: float
@@ -80,10 +86,15 @@ class RobotAgent:
     gaveup: np.ndarray | None = None     # cells still unresolved after a probe: no longer a frontier (shared)
     scanned_at: tuple | None = None      # where I last made a 360-degree camera scan
     probes: int = 0                      # times I drove into a cell my sensors could not resolve
-    energy_j: float = 0.0                # energy used so far (joules)
+    energy_j: float = 0.0                # joules the battery is down by (0 = full); see energy_used
     depleted: bool = False               # battery empty: stopped where I am
-    low_battery: bool = False            # turned home to recharge: stays home, never sent out again
+    low_battery: bool = False            # heading home to recharge (without recharging: stays home)
     low_battery_reason: str = ""
+    charges: int = 0                     # times I recharged at the base
+    energy_charged: float = 0.0          # joules the charger put back (energy used = energy_j + this)
+    charge_s: int = 0                    # seconds spent on the charger
+    unaffordable: int = 0                # goals I had to leave out this decision: not enough battery to get there and back
+    dist_home: np.ndarray | None = None  # distance (cells) from the base to every cell (battery checks)
     credit: float = 0.0                  # seconds of driving time available (see motion.py)
     conflicts: int = 0                   # times I had to wait because a teammate was in the way
     deadends: int = 0                    # dead ends / loops detected and backed out of
@@ -101,6 +112,11 @@ class RobotAgent:
     history: object = None               # the cells I came through, most recent last (to back off along)
     tabu: dict = field(default_factory=dict)   # goal cell -> time until which I avoid it (dead end)
     failed_breaks: int = 0               # attempts to drive through a laser-only obstacle that really was one
+    sweep: object = None                 # my coverage pattern (coverage.Sweep), None for frontier exploration
+    opt_dist: np.ndarray | None = None   # distances with unmapped cells assumed free (to reach pattern waypoints)
+    opt_parent: dict | None = None
+    track: list = field(default_factory=list)   # every cell I drove into, in order (for display)
+    outbox: list = field(default_factory=list)  # ids of my reports this second (applied in _communicate)
 
 
 @dataclass
@@ -138,6 +154,17 @@ class Simulator:
         for i, r in enumerate(sorted(self.robots, key=lambda r: r.cell[1])):
             order = np.argsort([c[1] for c in self.region_centres])
             r.region = int(order[i])
+        self.region_boxes = None
+        if cfg.coverage != "frontier":
+            # a fixed coverage pattern: one rectangle of the building per robot, each swept with the pattern
+            boxes = coverage.regions(self.world, cfg.n_robots)
+            starts_xy = [self.pos(r) for r in self.robots]
+            for r, k in zip(self.robots, coverage.assign(starts_xy, boxes, cfg.coverage, self.world)):
+                r.region = k
+                r.sweep = coverage.make_sweep(cfg.coverage, self.world, boxes[k], k, self.pos(r))
+            self.region = coverage.region_map(self.world, boxes)
+            self.region_boxes = boxes
+            self.region_centres = [((b[0] + b[2]) / 2 / cfg.cell, (b[1] + b[3]) / 2 / cfg.cell) for b in boxes]
         if cfg.vision == "none" and not cfg.lidar:
             raise ValueError("the robots need at least one sensor: a camera (vision) or the LiDAR")
         self.detector = None
@@ -171,6 +198,7 @@ class Simulator:
             r.trail, r.history = deque(maxlen=TRAIL_LEN), deque([r.cell], maxlen=80)
             r.visits[r.cell[1], r.cell[0]] += 1
             self.visits[r.cell[1], r.cell[0]] += 1
+            r.track.append(r.cell)
         self.reported_at: dict[int, int] = {}       # victim id -> time the base learned about it
         self.overlap_pairs = 0
         self.overlap_samples = 0
@@ -181,9 +209,16 @@ class Simulator:
                 "fusion": "AI on colour + thermal cameras", "ideal": "perfect eyes",
                 "none": "none (no camera on board: the robots cannot recognise people)"}[cfg.vision]
         maps = f"LiDAR ({cfg.lidar_range:g} m, all around) + depth camera" if cfg.lidar else "depth camera only (no LiDAR)"
-        self._log(f"{cfg.n_robots} robots enter a {cfg.damage}ly damaged {cfg.building} building "
+        where = "an open test ground" if cfg.building == "plain" else f"a {cfg.damage}ly damaged {cfg.building} building"
+        self._log(f"{cfg.n_robots} robots enter {where} "
                   f"(about {self.world.ambient:.0f} °C inside). Strategy: {cfg.strategy}. Vision: {eyes}. "
                   f"Mapping: {maps}. Radio: {radio}. {count}.")
+        for r in self.robots:
+            if r.sweep is not None:
+                b = r.sweep.box
+                self._log(f"R{r.id}: {r.sweep.pattern_name} of region {r.region + 1} (x {b[0]:.1f}-{b[2]:.1f} m, "
+                          f"y {b[1]:.1f}-{b[3]:.1f} m): {r.sweep.describe}, {len(r.sweep.cells)} waypoints, "
+                          f"{coverage.path_length(r.sweep.corners):.0f} m long.")
 
     # ------------------------------------------------------------------ helpers
     def _log(self, text: str) -> None:
@@ -240,19 +275,53 @@ class Simulator:
         0 otherwise, so the same settings always give the same mission."""
         return float(self._tie_rng.uniform(0.0, 0.3)) if self.cfg.run_seed is not None else 0.0
 
+    def capacity(self, r) -> float:
+        """Joules r's battery holds when full (inf = unlimited). cfg.battery_each overrides cfg.battery_wh."""
+        each = self.cfg.battery_each
+        wh = each[r.id] if r.id < len(each) else self.cfg.battery_wh
+        return wh * 3600.0 if wh and wh > 0 else np.inf
+
     def battery_left(self, r: RobotAgent) -> float:
         """Joules left in r's battery (inf when the battery is unlimited)."""
-        return np.inf if not self.cfg.battery_wh else self.cfg.battery_wh * 3600.0 - r.energy_j
+        return self.capacity(r) - r.energy_j
+
+    def charge(self, r) -> float | None:
+        """Share of r's battery left, 0..1 (None: unlimited)."""
+        cap = self.capacity(r)
+        return None if not np.isfinite(cap) else max(0.0, 1.0 - r.energy_j / cap)
 
     def _battery_low(self, r: RobotAgent) -> bool:
         """Quick check every second: is it time to head home? (straight-line distance x 1.5 for detours)"""
-        if not self.cfg.battery_wh or r.depleted or r.cell in self.world.starts:
+        if not np.isfinite(self.capacity(r)) or r.depleted or r.cell in self.world.starts:
             return False
         if r.low_battery:
             return True
         x, y = r.cell
         d = 1.5 * min(np.hypot(x - sx, y - sy) for sx, sy in self.world.starts) * self.cfg.cell
-        return self.battery_left(r) <= energy_home(self.cfg, d) + RESERVE * self.cfg.battery_wh * 3600.0
+        return self.battery_left(r) <= energy_home(self.cfg, d) + RESERVE * self.capacity(r)
+
+    def affordable(self, r: RobotAgent, cell, dist_m: float, work_s: float = 5.0) -> bool:
+        """Energy-aware task choice: can r drive dist_m to ``cell``, work there for work_s seconds (a scan,
+        a close look) and still get back to base with the safety factor and the reserve?
+            E_go   = 1.3 (e_drive d + P_base (d / v + work_s))
+            E_back = 1.3 (e_drive d_home + P_base d_home / v)
+            affordable  <=>  battery left >= E_go + E_back + 5 % of capacity
+        d_home comes from a distance field grown from the base on r's own map."""
+        cap = self.capacity(r)
+        if not np.isfinite(cap) or r.dist_home is None:
+            return True
+        d_home = float(r.dist_home[cell[1], cell[0]]) * self.cfg.cell
+        if not np.isfinite(d_home):
+            d_home = dist_m + float(np.hypot(*np.subtract(self.pos(r), self.world.to_metres(self.base.cell))))
+        cfg = self.cfg
+        go = SAFETY * (drive_energy_per_m(cfg) * dist_m + base_power(cfg) * (dist_m / cfg.speed + work_s))
+        return self.battery_left(r) >= go + energy_home(cfg, d_home) + RESERVE * cap
+
+    def recharge_goal(self, r: RobotAgent, why: str) -> Goal:
+        """Go home to recharge (the reason is kept until the robot is charged again)."""
+        home = min(self.world.starts, key=lambda c: r.dist[c[1], c[0]])
+        r.low_battery, r.low_battery_reason = True, why
+        return Goal("home", home, 0.0, float(r.dist[home[1], home[0]]) * self.cfg.cell, reason=why)
 
     def _route_blocked(self, r: RobotAgent) -> bool:
         """Has a new obstacle appeared on the route I am following?"""
@@ -375,14 +444,13 @@ class Simulator:
         rep = Report(len(self.reports), self.t, r.id, positive, float(x), float(y), float(p), float(d),
                      None if temp is None else float(temp))
         self.reports.append(rep)
-        before = len(r.registry.candidates)
-        change = r.registry.apply(rep)
-        if positive and len(r.registry.candidates) > before:
-            what = (f"R{r.id}'s thermal camera picked up a {temp:.0f} °C heat signature" if temp is not None
-                    else f"R{r.id} spotted a possible victim")
-            self._announce(x, y, "candidate", f"{what} at ({x:.1f}, {y:.1f}) m, confidence {p:.2f} from {d:.1f} m away")
-        if change:
-            self._status_event(r, rep, change)
+        r.outbox.append(rep.id)             # applied with everybody else's reports in _communicate
+
+    def _new_candidate_event(self, rep: Report) -> None:
+        what = (f"R{rep.robot}'s thermal camera picked up a {rep.temp:.0f} °C heat signature" if rep.temp is not None
+                else f"R{rep.robot} spotted a possible victim")
+        self._announce(rep.x, rep.y, "candidate", f"{what} at ({rep.x:.1f}, {rep.y:.1f}) m, confidence "
+                                                  f"{rep.confidence:.2f} from {rep.distance:.1f} m away")
 
     def _truth_at(self, x, y) -> str:
         for v in self.world.victims:
@@ -420,10 +488,7 @@ class Simulator:
         self._log(text)
         return True
 
-    def _status_event(self, r, rep, change) -> None:
-        c = r.registry._near(rep.x, rep.y, MERGE_RADIUS)
-        if c is None:
-            return
+    def _status_event(self, c, change) -> None:
         if change == "confirmed":
             heat = f", {c.temp:.0f} °C" if c.temp is not None else ""
             self._announce(c.x, c.y, "confirmed",
@@ -444,16 +509,24 @@ class Simulator:
             searched = np.logical_or.reduce([r.searched for r in g])
             gaveup = np.logical_or.reduce([r.gaveup for r in g])
             merged = classify(evidence)
-            ids = set().union(*(r.registry.known for r in g))
             for r in g:
                 if (r.known != merged).any() or (r.searched != searched).any():
                     self.messages += 1
                 r.evidence[:], r.solid[:], r.searched[:], r.known[:] = evidence, solid, searched, merged
                 r.gaveup[:] = gaveup
+        # victim reports: everyone in a group applies the same new reports in the same order (by id), then
+        # takes its verdicts, so robots holding the same evidence always agree (see victims.py)
+        for g in self._groups:
+            ids = set().union(*(r.registry.known | set(getattr(r, "outbox", ())) for r in g))
+            for r in g:
                 for rid in sorted(ids - r.registry.known):
-                    change = r.registry.apply(self.reports[rid])
-                    if change and r is not self.base:
-                        self._status_event(r, self.reports[rid], change)
+                    if r.registry.apply(self.reports[rid]) == "new" and r is not self.base:
+                        self._new_candidate_event(self.reports[rid])
+                for c, change in r.registry.settle(self.t):
+                    if r is not self.base:
+                        self._status_event(c, change)
+        for r in self.robots:
+            r.outbox.clear()
         links = {(a.id, b.id) for g in self._groups for a in g for b in g if a.id < b.id}
         self.links = links if self.cfg.comm_range else set()
 
@@ -470,6 +543,9 @@ class Simulator:
                 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
         if g.kind == "verify":
             return any(c.id == g.candidate for c in r.registry.open_candidates())
+        if g.kind == "sweep":                      # the waypoint I am heading for, and not inside an obstacle
+            x, y = g.cell
+            return r.sweep is not None and r.sweep.index == g.waypoint and r.known[y, x] != OBSTACLE
         if g.kind == "report":
             return not self.connected_to_base(r)
         if g.kind in ("probe", "backtrack"):
@@ -489,14 +565,14 @@ class Simulator:
         cfg = self.cfg
         home = min(self.world.starts, key=lambda c: r.dist[c[1], c[0]])
         d = float(r.dist[home[1], home[0]]) * cfg.cell
-        if cfg.battery_wh and np.isfinite(d):
-            cap = cfg.battery_wh * 3600.0
+        cap = self.capacity(r)
+        if np.isfinite(cap) and np.isfinite(d):
             left = self.battery_left(r)
             if r.low_battery or left <= energy_home(cfg, d) + RESERVE * cap:
-                if not r.low_battery:           # the decision sticks: a robot heading home to recharge stays home
+                if not r.low_battery:           # the decision sticks until the robot has recharged
                     r.low_battery = True
                     r.low_battery_reason = (f"battery low ({100 * left / cap:.0f}% left): just enough to drive the "
-                                            f"{d:.0f} m back to base")
+                                            f"{d:.0f} m back to base" + (" and recharge" if cfg.recharge else ""))
                 return Goal("home", home, 0.0, d, reason=r.low_battery_reason)
         if cfg.victims_known and len(r.registry.people()) >= cfg.n_victims:
             return Goal("home", home, 0.0, d, reason=f"all {cfg.n_victims} expected victims are confirmed: mission complete")
@@ -514,7 +590,7 @@ class Simulator:
     def _decide(self) -> None:
         deciding = []
         for r in self.robots:
-            if r.state in ("scanning", "verifying") or r.depleted:
+            if r.state in ("scanning", "verifying", "charging") or r.depleted:
                 continue
             periodic = self.t - r.last_decision >= REDECIDE_EVERY
             if r.state == "done" and not periodic:
@@ -537,11 +613,18 @@ class Simulator:
             r.dist, r.parent = dijkstra(r.known, r.cell, avoid)
             r.dist_ms = (time.perf_counter() - t0) * 1000.0
             r.last_decision = self.t
+            r.unaffordable = 0
+            if np.isfinite(self.capacity(r)):                # how far every cell is from the base (battery checks)
+                r.dist_home, _ = dijkstra(r.known, self.base.cell, optimistic=r.sweep is not None and not r.sweep.done)
+            if r.sweep is not None and not r.sweep.done:       # waypoints may lie in space not mapped yet
+                r.opt_dist, r.opt_parent = dijkstra(r.known, r.cell, avoid, optimistic=True)
         special = {r.id: self._special_goal(r) for r in deciding}
         choices = choose(self, [r for r in deciding if special[r.id] is None])
         choices.update({k: v for k, v in special.items() if v is not None})
         for r in deciding:
             g = choices.get(r.id)
+            if g is None and r.unaffordable:
+                g = self._battery_blocked(r)
             if g is None:
                 g = self._breakthrough(r)
             if g is None:
@@ -555,7 +638,8 @@ class Simulator:
                     self._log(f"R{r.id} returns to base: {g.reason}.")
                 r.reason = g.reason
                 if g.kind == "home" and r.cell == g.cell:
-                    r.state, r.goal, r.path = "done", g, []
+                    r.goal, r.path = g, []
+                    self._at_base(r)
                     continue
                 r.state = "returning" if g.kind == "home" else "reporting"
             else:
@@ -565,7 +649,7 @@ class Simulator:
                     self._log(f"R{r.id} goes to take a closer look at the sighting near "
                               f"({g.look_at[0]:.1f}, {g.look_at[1]:.1f}) m ({g.distance:.0f} m away).")
                 r.state = {"frontier": "exploring", "verify": "verifying_trip", "transit": "transit", "probe": "exploring",
-                           "backtrack": "backtracking"}[g.kind]
+                           "backtrack": "backtracking", "sweep": "sweeping"}[g.kind]
                 if g.kind == "probe":
                     self._log(f"R{r.id}: {g.reason}.")
                 r.reason = g.reason
@@ -591,16 +675,21 @@ class Simulator:
                 and r.goal.cell == g.cell and not self._route_blocked(r):
             return r.path
         extra = cfg.revisit_penalty * np.minimum(self.visits, 5).astype(float) if cfg.revisit_penalty else None
+        # a pattern waypoint may lie beyond the mapped area: plan as if unmapped cells were free (the free-space
+        # assumption) and replan as soon as the sensors show an obstacle on the route (_route_blocked)
+        optimistic = g.kind == "sweep"
+        known = np.where(r.known == UNKNOWN, FREE, r.known).astype(np.int8) if optimistic else r.known
+        dist, parent = (r.opt_dist, r.opt_parent) if optimistic else (r.dist, r.parent)
         if cfg.planner == "dijkstra" and extra is None:
             # the distance field computed to choose the goal already holds the shortest route
-            path = path_to(r, g)
-            p = Plan(path, route_length(r.cell, path), route_length(r.cell, path), int(np.isfinite(r.dist).sum()),
+            path = extract_path(parent, r.cell, g.cell)
+            p = Plan(path, route_length(r.cell, path), route_length(r.cell, path), int(np.isfinite(dist).sum()),
                      r.dist_ms, "dijkstra")
         else:
             avoid = {o.cell for o in self.robots if o is not r} if r.stuck >= 3 else None
-            p = plan(cfg.planner, r.known, r.cell, g.cell, self.plan_rng, extra, avoid, reach=np.isfinite(r.dist))
+            p = plan(cfg.planner, known, r.cell, g.cell, self.plan_rng, extra, avoid, reach=np.isfinite(dist))
             if not p.path:
-                p.path = path_to(r, g)
+                p.path = extract_path(parent, r.cell, g.cell)
         r.plan, r.plans, r.plan_ms, r.plan_work = p, r.plans + 1, r.plan_ms + p.ms, r.plan_work + p.expanded
         return list(p.path)
 
@@ -617,6 +706,15 @@ class Simulator:
                 r.scan_left -= 1
                 if r.scan_left <= 0:
                     r.state, r.goal = "idle", None
+                continue
+            if r.state == "charging":                     # docked: the charger refills the battery
+                r.energy_charged += min(r.energy_j, cfg.charge_power)
+                r.energy_j = max(0.0, r.energy_j - cfg.charge_power)
+                r.charge_s += 1
+                if r.energy_j <= 0.0:
+                    r.low_battery, r.low_battery_reason = False, ""
+                    r.state, r.goal, r.last_decision = "idle", None, -10**9
+                    self._log(f"R{r.id} is fully charged after {r.charge_s} s on the charger in total: back to work.")
                 continue
             if r.state == "verifying":
                 gx, gy = r.goal.look_at
@@ -669,15 +767,15 @@ class Simulator:
         for r in self.robots:
             if r.depleted:
                 continue
-            if r.state != "done":
+            if r.state not in ("done", "charging"):
                 r.energy_j += base_power(cfg)
-            if cfg.battery_wh and r.energy_j >= cfg.battery_wh * 3600.0:
+            if r.energy_j >= self.capacity(r):
                 r.depleted, r.state, r.path, r.goal = True, "done", [], None
                 m = self.pos(r)
                 r.reason = f"battery empty at ({m[0]:.1f}, {m[1]:.1f}) m: stopped, waiting to be recovered"
                 self._log(f"R{r.id}: {r.reason}.")
                 continue
-            if r.state in ("exploring", "verifying_trip", "transit", "returning", "reporting", "backtracking"):
+            if r.state in ("exploring", "sweeping", "verifying_trip", "transit", "returning", "reporting", "backtracking"):
                 r.trail.append(r.cell)
                 if cfg.deadend_recovery and r.goal is not None and r.goal.kind != "backtrack" and \
                         (stuck_in_loop(r.trail) or r.stuck >= BLOCKED_STEPS):
@@ -744,6 +842,7 @@ class Simulator:
             self.team_repeat += 1
         r.visits[tgt[1], tgt[0]] += 1
         self.visits[tgt[1], tgt[0]] += 1
+        r.track.append(tgt)
         if not r.history or r.history[-1] != tgt:
             r.history.append(tgt)
         if r.path and r.path[0] == tgt:
@@ -759,7 +858,7 @@ class Simulator:
         looping = stuck_in_loop(r.trail)
         g = r.goal
         r.deadends += 1
-        if g.kind in ("frontier", "verify", "probe", "transit"):
+        if g.kind in ("frontier", "verify", "probe", "transit", "sweep"):
             r.tabu[g.cell] = self.t + TABU_S
         others = {o.cell for o in self.robots if o is not r}
         dist, parent = dijkstra(r.known, r.cell, others)
@@ -791,11 +890,41 @@ class Simulator:
                 r.state, r.goal = "idle", None
         elif g.kind == "verify":
             r.state, r.look_left = "verifying", 2
+        elif g.kind == "sweep":                    # waypoint reached: on to the next one (no 360 degree scan:
+            sw = r.sweep                           # the pattern's lane spacing already covers the ground)
+            if sw.index == g.waypoint:
+                sw.arrive(len(r.track) - 1)
+            r.state, r.goal = "idle", None
         elif g.kind == "home":
-            r.state = "done"
-            self._log(f"R{r.id} is back at base.")
+            self._at_base(r)
         elif g.kind in ("report", "transit", "backtrack"):
             r.state, r.goal = "idle", None
+
+    def _at_base(self, r: RobotAgent) -> None:
+        """Arrived at the base: recharge if I came back on low battery, otherwise my work is done."""
+        if r.low_battery and self.cfg.recharge and np.isfinite(self.capacity(r)):
+            if r.energy_j > 0.0:
+                r.state, r.charges = "charging", r.charges + 1
+                r.reason = f"charging at the base ({100 * self.charge(r):.0f}% now, {self.cfg.charge_power:g} W charger)"
+                self._log(f"R{r.id} docks at the base with {100 * self.charge(r):.0f}% battery: charging.")
+                return
+        r.state = "done"
+        self._log(f"R{r.id} is back at base" + (": its battery is empty of useful range, it stays here." if r.low_battery else "."))
+
+    def _battery_blocked(self, r: RobotAgent) -> Goal | None:
+        """Work is left on my map, but none of it is within reach of my battery (there and back).
+        Go and recharge; with a full battery that still cannot reach it, stay at the base."""
+        cap = self.capacity(r)
+        full = r.energy_j <= 0.02 * cap + 5 * base_power(self.cfg)      # as good as full: just off the charger
+        at_base = r.cell in self.world.starts
+        if self.cfg.recharge and not (full and at_base):
+            return self.recharge_goal(r, f"{r.unaffordable} task(s) left, but with {100 * self.charge(r):.0f}% "
+                                         f"battery I could not get there and back: going to recharge")
+        r.finished_reason = (f"{r.unaffordable} task(s) left, but even a full {cap / 3600:g} Wh battery cannot reach them "
+                             f"and come back" if full else
+                             f"{r.unaffordable} task(s) left, beyond the reach of my {100 * self.charge(r):.0f}% battery "
+                             f"(recharging is off)")
+        return None
 
     def _probe(self, r: RobotAgent) -> None:
         """I stand on a frontier, but my sensors cannot resolve the unknown cell next to it (a table
@@ -971,5 +1100,5 @@ class Simulator:
                     self._log(f"ALL {n} victims have been found at t={self.t + 1}s.")
         false = len(conf) - len(matched)
         self.history.append({"t": self.t + 1, "coverage": round(self.coverage(), 4), "mapped": round(self.mapped(), 4),
-                             "energy_wh": round(sum(r.energy_j for r in self.robots) / 3600.0, 3),
+                             "energy_wh": round(sum(r.energy_used for r in self.robots) / 3600.0, 3),
                              "found": len(self.found_at), "false": false})

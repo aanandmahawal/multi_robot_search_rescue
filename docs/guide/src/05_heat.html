@@ -1,0 +1,65 @@
+<h1><span class="num">5</span>Heat: how temperatures are assigned</h1>
+<p class="lead">A thermal camera is only as meaningful as the temperatures it looks at. <code>rescue/thermal.py</code> gives every 25 cm square of the building
+a surface temperature in °C, following simple physical rules. The rules are chosen so that the thermal camera faces the same difficulties as a real one:
+warm things that are not people, and people it cannot see.</p>
+
+<h2>5.1 The building itself</h2>
+<p>Each building type has an <b>ambient temperature</b>: office 20 °C, apartments 21, hospital 22, school 19, parking 13, warehouse 15, test ground 20.
+Collapsed walls let outside air in, so damage cools it: −0.5 °C (light), −1.5 °C (moderate), −3 °C (severe). On top of that:</p>
+<ul>
+<li><b>drift</b>: a smooth random field (Gaussian-blurred noise, σ = 6 fine cells = 1.5 m) scaled to ±0.8 °C, for draughts and sunlit patches;</li>
+<li><b>noise</b>: ±0.15 °C per square;</li>
+<li><b>walls and structure</b> are 0.6 °C cooler (concrete and steel).</li>
+</ul>
+
+<h2>5.2 People</h2>
+<p>Each victim gets a skin temperature drawn between <b>33 and 36 °C</b>. Half of the victims have been trapped for hours and have cooled by up to 4 °C
+(<b>hypothermia</b>), so a victim can be as cool as 29 °C. The head segment shows the skin temperature. Torso and legs are covered by clothing,
+which insulates and shows <b>4–7 °C cooler</b> than the skin.</p>
+
+<h2>5.3 Rubble blocks the heat</h2>
+<p>This rule decides which victims can be found at all. Heat leaking through a cover of thickness d falls off exponentially:</p>
+<div class="eq">T<sub>surface</sub> = T<sub>ambient</sub> + (T<sub>body</sub> − T<sub>ambient</sub>) · e<sup>−d / 0.10 m</sup></div>
+<table>
+<tr><th>Cover on the body</th><th>Thickness d</th><th>Share of the body's warmth at the surface</th><th>Who can find this person?</th></tr>
+<tr><td>none</td><td>0</td><td>100 %</td><td>colour and thermal cameras</td></tr>
+<tr><td>thin dust / light debris</td><td>6–14 cm</td><td>55 % … 25 % (e.g. 10 cm → e<sup>−1</sup> = 37 %)</td><td>only the thermal camera (a faint warm patch)</td></tr>
+<tr><td>partly buried</td><td>35–60 cm on 2–4 of 7 segments</td><td>the uncovered segments: 100 %</td><td>both, if an uncovered part is in view</td></tr>
+<tr><td>thick concrete rubble</td><td>40–80 cm over the whole body</td><td>2 % … 0.03 %</td><td><b>nobody</b>: no camera can see through concrete</td></tr>
+</table>
+<p>How many victims are fully covered depends on the damage: light 5 % thin / 0 % thick, moderate 10 % / 10 %, severe 10 % / 20 %. People under thick rubble are
+<b>undetectable by design</b>. The project reports them separately ("victims buried deep") so its results never pretend that a camera can see through concrete.
+Finding them would need listening devices, search dogs or rescuers digging.</p>
+
+<h2>5.4 Warm things that are not people</h2>
+<p>A colour camera can be fooled by a jacket; a thermal camera by anything warm. Six warm objects per building (chosen to suit the building type) give the thermal
+detector realistic hard cases:</p>
+<table>
+<tr><th>Warm object</th><th>Temperature</th><th>Buildings</th><th>Why it is hard</th></tr>
+<tr><td>space heater</td><td>42–60 °C</td><td>office, apartments, school, hospital</td><td>hot, but caught by the 40 °C rule</td></tr>
+<tr><td>laptop left running</td><td>34–42 °C</td><td>office, school, hospital, warehouse</td><td>small, person-warm</td></tr>
+<tr><td>hot-water leak (puddle)</td><td>28–38 °C</td><td>apartments, hospital, office, school</td><td>large warm patch; robots can drive through it</td></tr>
+<tr><td>dog</td><td>31–36 °C</td><td>apartments, parking, warehouse, school</td><td><b>same temperature as a person, body-like shape</b></td></tr>
+<tr><td>sun-warmed rubble</td><td>28–36 °C</td><td>all</td><td>warm, irregular, lies where victims lie</td></tr>
+<tr><td>car engine that ran recently</td><td>40–65 °C (bonnet)</td><td>parking (40 % of cars)</td><td>big and warm; usually too hot</td></tr>
+</table>
+
+<figure><img src="img/thermal.png">
+<figcaption><b>Figure 5.1</b> Left: the temperature field of an apartment block in the "ironbow" palette used by thermal cameras (black = cold, white = hot). Bodies,
+a dog and hot water glow; the walls are slightly cooler. Middle: the temperature ranges overlap. Clothing, skin, dogs and warm rubble share 28–36 °C, which is why
+temperature alone cannot identify a person. Right: how quickly rubble blocks heat.</figcaption></figure>
+
+<h2>5.5 The one physics rule the robots use</h2>
+<p>Nothing on a living person is hotter than about <b>40 °C</b>. So if the detector says "person" but the hottest pixel of that detection is above 40 °C, the
+detection is dropped as a heater or an engine (<code>thermal_check</code>, <code>HUMAN_MAX</code>). This rule cannot remove a dog or warm rubble, because they sit
+<i>inside</i> the human range. Those are left to the neural network (shape and appearance) and the belief filter (repeated, close looks), chapter 7.</p>
+
+<div class="box tip"><b>Interview tip: "is the temperature real?"</b>
+<p>"No. It is a physically-motivated simulated temperature field: ambient per building, skin 33–36 °C with possible hypothermia, clothing 4–7 °C cooler, heat through
+rubble falling as e<sup>−d/10 cm</sup>, and warm look-alikes with realistic ranges. A camera model then adds blur, noise, drift and haze. The point is that the thermal
+detector has to cope with the same ambiguities a real one does: a dog at 33 °C, and a person under 50 cm of concrete with no signature at all."</p></div>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/thermal.py</code>: <code>add_thermal</code> (ambient, drift, walls), <code>_bury_and_warm_victims</code> (skin, clothing, covers, heat leak),
+<code>_place_warm_objects</code>, <code>_warm_car_engines</code>, <code>palette</code> (ironbow colours). It uses its own random stream (<code>seed + 7</code>), so adding
+heat never changed any building layout.</p></div>

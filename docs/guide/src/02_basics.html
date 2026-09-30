@@ -1,0 +1,98 @@
+<h1><span class="num">2</span>Robotics basics you need</h1>
+<p class="lead">Five ideas appear on almost every page of this guide: grids, neighbours, coordinates, maps and the robot's body.
+This chapter explains each one with the exact numbers the project uses.</p>
+
+<h2>2.1 The world as a grid of cells</h2>
+<p>A computer cannot reason about "the floor" as a continuous surface. So the floor is cut into small squares called <b>cells</b>, like the squares of a
+chessboard. Every cell is <b>0.5 m × 0.5 m</b>. The default building is 56 cells wide and 40 cells tall (28 m × 20 m). Each cell is either
+<i>blocked</i> (a wall, furniture, rubble, a person lying on the floor) or <i>free</i> (a robot can stand there).</p>
+
+<div class="two">
+<div>
+<p>Converting between metres and cells is simple arithmetic:</p>
+<div class="eq">cell = floor(metres / 0.5) &nbsp;&nbsp;&nbsp; centre = (cell + ½) × 0.5 m</div>
+<p>So a point at (3.3 m, 7.9 m) lies in cell (6, 15), whose centre is at (3.25 m, 7.75 m). <b>x grows to the right, y grows downwards</b>
+(the convention of images and screens), and angles are measured from the +x axis, so 90° points down the map.</p>
+<p>A robot occupies exactly one cell at a time. It knows which cell it is in (see the limitation box below), and it moves from a cell to one of its
+neighbours.</p>
+</div>
+<figure style="margin-top:0">
+<svg viewBox="0 0 330 250" width="330">
+  <g stroke="#b9c3cf" stroke-width="1">
+    <rect x="15" y="10" width="300" height="200" fill="#fbfcfd"/>
+    <path d="M65 10V210M115 10V210M165 10V210M215 10V210M265 10V210M15 60H315M15 110H315M15 160H315"/>
+  </g>
+  <rect x="165" y="60" width="50" height="50" fill="#3d4450"/>
+  <rect x="115" y="110" width="50" height="50" fill="#fdeee4" stroke="#d9622b" stroke-width="2"/>
+  <text x="140" y="140" text-anchor="middle" class="d-tb" fill="#d9622b">R</text>
+  <g class="d-arrow-b"><path d="M140 120 L140 80"/><path d="M155 135 L200 135"/><path d="M125 135 L80 135"/><path d="M140 150 L140 190"/>
+  <path d="M125 120 L92 87"/><path d="M125 150 L92 183"/><path d="M155 150 L188 183"/></g>
+  <path d="M155 120 L188 87" stroke="#c0392b" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="196" y="80" class="d-ts" fill="#c0392b">✕ corner cut</text>
+  <text x="165" y="232" text-anchor="middle" class="d-ts">straight step = 1 cell (0.5 m) · diagonal = √2 ≈ 1.414 cells (0.71 m)</text>
+</svg>
+<figcaption><b>Figure 2.1</b> The 8 moves from a cell. A diagonal step is only allowed if <i>both</i> side cells are free, so the robot never squeezes past the corner of a wall.</figcaption>
+</figure>
+</div>
+
+<h2>2.2 Neighbours and step costs</h2>
+<p>From any cell a robot can move to its <b>8 neighbours</b>: 4 straight (right, left, down, up) and 4 diagonal. A straight step costs
+<b>1</b> (0.5 m of driving) and a diagonal step costs <b>1.4142</b> (√2, 0.71 m). One rule matters a lot: <b>no corner cutting</b>. A diagonal
+move is only allowed when both of the cells it passes between are free. Without that rule a robot could slip "through" the corner where two
+walls meet, which a real robot of any width cannot do. This one rule is applied identically by every planner in the project, so their routes
+can be compared fairly.</p>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/mapping.py</code>: <code>MOVES</code> lists the 8 moves and their costs; the corner-cutting test
+<code>if dx and dy and not (free[y, nx] and free[ny, x])</code> appears in <code>dijkstra</code>, and the same line is in every planner in
+<code>rescue/planners.py</code>.</p></div>
+
+<h2>2.3 A 2.5-D world</h2>
+<p>The 3-D view looks fully three-dimensional, but the simulation stores the world as a <b>heightfield</b>: for every small square of floor,
+how tall is the thing standing on it? This is called <b>2.5-D</b>: height is known, but nothing can float above anything else (no tables with
+empty space underneath). Two grids describe the same world:</p>
+<table>
+<tr><th>Grid</th><th>Cell size</th><th>Used for</th><th>What each cell stores</th></tr>
+<tr><td>Navigation grid</td><td>0.5 m (56 × 40)</td><td>maps, planning, robot positions</td><td><code>blocked</code> yes/no, tallest height in the cell</td></tr>
+<tr><td>Fine grid</td><td>0.25 m (112 × 80)</td><td>rendering camera images, LiDAR beams, temperatures</td><td>height (m), colour (RGB), object id, temperature (°C), rubble cover (m)</td></tr>
+</table>
+<p>Heights matter because the sensors see at different heights. The LiDAR's laser sweeps a flat plane <b>0.40 m</b> above the floor: it sees
+walls, shelves and cars, but its beams pass <i>over</i> a person lying on the floor (about 0.2–0.3 m tall). The camera sits at <b>0.55 m</b>, looks
+14° down, and anything taller than about 0.60 m blocks its view.</p>
+
+<div class="box simple"><b>In simple words</b>
+<p>The robots live on a flat floor, so they only need to plan in 2-D (x, y and the direction they face). The building still has real heights,
+because heights decide what each sensor can and cannot see. That is why a 3-D-looking world with a 2-D planner is a sound design for ground
+robots, not a shortcut.</p></div>
+
+<h2>2.4 Maps: what a robot believes</h2>
+<p>There are two kinds of "map" and it is essential not to mix them up:</p>
+<ul>
+<li>The <b>true world</b>: where walls and people really are. Only the simulator knows it.</li>
+<li>Each robot's <b>own map</b>: what its sensors have told it. Every cell is <b>UNKNOWN</b> (never measured), <b>FREE</b> or <b>OBSTACLE</b>. At the start
+everything is unknown except the entrance area. This is called an <b>occupancy grid</b>, and chapter 6 explains how measurements fill it in.</li>
+</ul>
+<p>A robot plans its routes only through cells its own map calls FREE. If the map is wrong (a laser beam missed a low obstacle), the robot finds out
+when it drives into it: the <b>bumper</b> stops it, the cell is marked as an obstacle, and it plans again.</p>
+
+<h2>2.5 The robot's body and time</h2>
+<p>The robots are modelled as 25 kg tracked vehicles with <b>differential drive</b>: two tracks, like a tank. Such a robot can turn on the spot by
+running its tracks in opposite directions, and drives straight when both run at the same speed. In the simulation a move to a neighbouring cell
+is therefore <i>turn first, then drive</i>, and it takes</p>
+<div class="eq">t = |Δθ| / ω<sub>max</sub> + d / v</div>
+<p>where Δθ is the heading change, ω<sub>max</sub> = 180°/s is the turning rate, d is 0.5 m (straight) or 0.71 m (diagonal) and v = 0.5 m/s is the
+driving speed. A straight step takes 1 s, a diagonal 1.41 s, and a 90° turn adds 0.5 s. Every simulated second gives each robot one second of
+"time credit". A move is started while the credit is positive and its duration is subtracted. So over a whole mission a robot drives exactly at
+its speed, and sharp turns really cost time.</p>
+
+<div class="box warn"><b>Limitation: the robots know where they are</b>
+<p>Real robots must estimate their own position (<b>localisation</b>) from wheel odometry, an IMU and matching laser scans to the map. Doing that while
+building the map is called <b>SLAM</b> (simultaneous localisation and mapping). This project gives every robot its exact cell. It does <i>not</i>
+simulate SLAM. That keeps the focus on exploration, coordination, perception and planning. Chapter 15 describes what a real deployment would add.</p></div>
+
+<h2>2.6 Random numbers and seeds</h2>
+<p>Everything random (the building layout, sensor noise, where the victims lie, the random choices inside RRT* and the ant colony) comes from a
+<b>pseudo-random generator started from a seed</b>. The same seed always gives exactly the same building and, unless you ask the runs to vary,
+exactly the same mission, move for move. This is what makes fair comparisons possible: to compare A* with Dijkstra, you run both in the same
+building with the same noise. The project keeps separate random streams for the building (<code>seed</code>), the thermal layer
+(<code>seed + 7</code>), sensor noise, planning and tie-breaks (<code>run_seed</code>), so changing one never silently changes another.</p>

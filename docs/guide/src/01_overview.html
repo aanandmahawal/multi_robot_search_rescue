@@ -1,0 +1,124 @@
+<h1><span class="num">1</span>The project in one picture</h1>
+<p class="lead">A building has partly collapsed. Nobody knows its layout any more, or how many people are inside. A small team of
+ground robots enters through one door. They have to map the building, search every reachable corner with their
+cameras, recognise the people, and report where they are, without crashing into each other or running out of battery.</p>
+
+<p><b>RescueThermal AI</b> simulates exactly that mission. It is a complete, working system:</p>
+<ul>
+<li>a <b>world generator</b> that builds a new damaged building every time (office, apartments, hospital, school, parking garage,
+warehouse, or an open test ground), with furniture, rubble, hidden victims and objects that look like people;</li>
+<li><b>simulated sensors</b>: a spinning laser (LiDAR), a colour camera with depth, and a thermal camera;</li>
+<li><b>mapping</b>: each robot builds its own map from noisy measurements, and the team shares maps by radio;</li>
+<li>a <b>neural network</b> that looks at the camera images and says where a person might be, plus a statistical filter
+that decides when a sighting is certain enough to report;</li>
+<li><b>decision making</b> on three levels: a <i>coverage pattern</i> (how to sweep the space), a <i>team strategy</i> (which robot
+takes which task) and a <i>route planner</i> (how to drive there);</li>
+<li><b>motion</b> with realistic timing, energy use, collision avoidance, dead-end recovery and battery management;</li>
+<li>a <b>3-D dashboard</b> in the browser where you configure missions and watch every decision, and scripts that measure how
+well it all works.</li>
+</ul>
+
+<div class="box simple"><b>In simple words</b>
+<p>Think of four people with torches searching a dark, wrecked house. Each person sketches a floor plan as they walk. They phone each
+other to share sketches and to split the work ("you take the left wing"). When one of them sees something that might be a person,
+they walk closer to check before shouting "found someone!". That is what the robots do, with a laser instead of a sketch pad and a
+neural network instead of eyes.</p></div>
+
+<h2>1.1 The one-second loop</h2>
+<p>The simulation runs in steps of one second. In every step each robot goes through the same five phases. This loop, <b>sense, detect,
+communicate, decide, act</b>, is the heartbeat of the whole project, and nearly every later chapter explains one of its boxes.</p>
+
+<figure>
+<svg viewBox="0 0 760 250" width="760">
+  <rect x="10" y="30" width="130" height="80" rx="8" class="d-box"/><text x="75" y="58" text-anchor="middle" class="d-tb">1 · SENSE</text>
+  <text x="75" y="78" text-anchor="middle" class="d-ts">LiDAR scan, camera view,</text><text x="75" y="93" text-anchor="middle" class="d-ts">thermal image → map</text>
+  <rect x="160" y="30" width="130" height="80" rx="8" class="d-warm"/><text x="225" y="58" text-anchor="middle" class="d-tb">2 · DETECT</text>
+  <text x="225" y="78" text-anchor="middle" class="d-ts">neural network finds</text><text x="225" y="93" text-anchor="middle" class="d-ts">possible people → reports</text>
+  <rect x="310" y="30" width="140" height="80" rx="8" class="d-violet"/><text x="380" y="58" text-anchor="middle" class="d-tb">3 · COMMUNICATE</text>
+  <text x="380" y="78" text-anchor="middle" class="d-ts">merge maps and reports,</text><text x="380" y="93" text-anchor="middle" class="d-ts">take verdicts together</text>
+  <rect x="470" y="30" width="130" height="80" rx="8" class="d-green"/><text x="535" y="58" text-anchor="middle" class="d-tb">4 · DECIDE</text>
+  <text x="535" y="78" text-anchor="middle" class="d-ts">robots without a goal</text><text x="535" y="93" text-anchor="middle" class="d-ts">choose one + a route</text>
+  <rect x="620" y="30" width="130" height="80" rx="8" class="d-grey"/><text x="685" y="58" text-anchor="middle" class="d-tb">5 · ACT</text>
+  <text x="685" y="78" text-anchor="middle" class="d-ts">turn, drive, scan, look;</text><text x="685" y="93" text-anchor="middle" class="d-ts">spend time and energy</text>
+  <path d="M140 70 L158 70" class="d-arrow"/><path d="M290 70 L308 70" class="d-arrow"/><path d="M450 70 L468 70" class="d-arrow"/><path d="M600 70 L618 70" class="d-arrow"/>
+  <path d="M685 112 L685 160 L75 160 L75 114" class="d-arrow-b"/>
+  <text x="380" y="152" text-anchor="middle" class="d-t" fill="#1f6fd1">next second: the world has changed, sense again (closed loop)</text>
+  <rect x="60" y="185" width="640" height="52" rx="6" fill="#fff8e6" stroke="#e0b64a"/>
+  <text x="380" y="206" text-anchor="middle" class="d-t">The simulator uses the <tspan font-weight="700">ground truth</tspan> (where walls and people really are) only to render</text>
+  <text x="380" y="224" text-anchor="middle" class="d-t">sensor readings and to score the result. The robots decide using only what their sensors told them.</text>
+</svg>
+<figcaption><b>Figure 1.1</b> The five phases every robot goes through each simulated second (<code>Simulator.step</code> in <code>rescue/simulator.py</code>).</figcaption>
+</figure>
+
+<p>Two design rules make the simulation honest. <b>First</b>, a robot only uses what its own sensors (or its teammates, over the radio)
+have told it. It does not know where walls are until its laser hits them, and it does not know where people are until a camera sees them.
+<b>Second</b>, the ground truth is used for exactly two things: to generate what a sensor would measure, and to score the mission afterwards
+(was that "person" really a person?).</p>
+
+<h2>1.2 The whole architecture</h2>
+<p>The next diagram connects every part of the system. Read it from top to bottom. The world produces measurements, measurements become maps
+and sightings, and three decision layers turn those into motion. Motion changes what the sensors see next.</p>
+
+<figure>
+<svg viewBox="0 0 760 520" width="760">
+  <rect x="250" y="8" width="260" height="46" rx="7" class="d-grey"/><text x="380" y="28" text-anchor="middle" class="d-tb">WORLD (world.py, thermal.py)</text>
+  <text x="380" y="45" text-anchor="middle" class="d-ts">walls · furniture · rubble · victims · look-alikes · temperatures</text>
+  <rect x="20" y="82" width="220" height="56" rx="7" class="d-box"/><text x="130" y="103" text-anchor="middle" class="d-tb">LiDAR (lidar.py)</text>
+  <text x="130" y="121" text-anchor="middle" class="d-ts">240 distances, 360°, 8 m, 40 cm high</text>
+  <rect x="270" y="82" width="220" height="56" rx="7" class="d-box"/><text x="380" y="103" text-anchor="middle" class="d-tb">RGB-D camera (sensors.py)</text>
+  <text x="380" y="121" text-anchor="middle" class="d-ts">colour + depth, 90°, 5 m</text>
+  <rect x="520" y="82" width="220" height="56" rx="7" class="d-warm"/><text x="630" y="103" text-anchor="middle" class="d-tb">Thermal camera (sensors.py)</text>
+  <text x="630" y="121" text-anchor="middle" class="d-ts">°C of every pixel, noisy, blurred</text>
+  <path d="M330 54 L140 80" class="d-arrow"/><path d="M380 54 L380 80" class="d-arrow"/><path d="M430 54 L620 80" class="d-arrow"/>
+  <rect x="20" y="168" width="340" height="60" rx="7" class="d-violet"/><text x="190" y="190" text-anchor="middle" class="d-tb">MAPS (mapping.py)</text>
+  <text x="190" y="208" text-anchor="middle" class="d-ts">evidence grid: free / obstacle / unknown</text><text x="190" y="222" text-anchor="middle" class="d-ts">+ "searched" layer + frontiers</text>
+  <rect x="400" y="168" width="340" height="60" rx="7" class="d-warm"/><text x="570" y="190" text-anchor="middle" class="d-tb">PERCEPTION (perception.py, victims.py)</text>
+  <text x="570" y="208" text-anchor="middle" class="d-ts">CNN heatmap → sightings → belief filter</text><text x="570" y="222" text-anchor="middle" class="d-ts">→ candidate / confirmed / rejected</text>
+  <path d="M130 138 L150 166" class="d-arrow"/><path d="M380 138 L250 166" class="d-arrow"/><path d="M380 138 L520 166" class="d-arrow"/><path d="M630 138 L600 166" class="d-arrow"/>
+  <rect x="200" y="252" width="360" height="34" rx="7" class="d-grey"/><text x="380" y="274" text-anchor="middle" class="d-tb">RADIO: merge maps + reports, one team verdict</text>
+  <path d="M190 228 L300 250" class="d-arrow"/><path d="M570 228 L460 250" class="d-arrow"/>
+  <rect x="20" y="310" width="720" height="130" rx="9" fill="#f7fbf8" stroke="#1e8449" stroke-width="1.3"/>
+  <text x="34" y="330" class="d-tb" fill="#1e8449">DECISION (coordination.py, coverage.py, planners.py)</text>
+  <rect x="40" y="342" width="160" height="80" rx="7" class="d-green"/><text x="120" y="364" text-anchor="middle" class="d-tb">Special goals</text>
+  <text x="120" y="382" text-anchor="middle" class="d-ts">battery low → home</text><text x="120" y="397" text-anchor="middle" class="d-ts">all found → home</text><text x="120" y="412" text-anchor="middle" class="d-ts">news → radio range</text>
+  <rect x="220" y="342" width="160" height="80" rx="7" class="d-green"/><text x="300" y="364" text-anchor="middle" class="d-tb">Coverage pattern</text>
+  <text x="300" y="382" text-anchor="middle" class="d-ts">frontier / lawnmower /</text><text x="300" y="397" text-anchor="middle" class="d-ts">spiral: WHERE next?</text>
+  <rect x="400" y="342" width="160" height="80" rx="7" class="d-green"/><text x="480" y="364" text-anchor="middle" class="d-tb">Team strategy</text>
+  <text x="480" y="382" text-anchor="middle" class="d-ts">random / greedy / partition</text><text x="480" y="397" text-anchor="middle" class="d-ts">/ auction: WHO goes?</text>
+  <rect x="580" y="342" width="145" height="80" rx="7" class="d-green"/><text x="652" y="364" text-anchor="middle" class="d-tb">Route planner</text>
+  <text x="652" y="382" text-anchor="middle" class="d-ts">Dijkstra / A* / RRT* /</text><text x="652" y="397" text-anchor="middle" class="d-ts">ant colony: HOW?</text>
+  <path d="M200 382 L218 382" class="d-arrow"/><path d="M380 382 L398 382" class="d-arrow"/><path d="M560 382 L578 382" class="d-arrow"/>
+  <path d="M380 286 L380 308" class="d-arrow"/>
+  <rect x="120" y="462" width="520" height="46" rx="7" class="d-grey"/><text x="380" y="482" text-anchor="middle" class="d-tb">MOTION (motion.py, simulator.py)</text>
+  <text x="380" y="499" text-anchor="middle" class="d-ts">turn + drive with time and energy · teammates · DWA · bumper · dead ends · battery</text>
+  <path d="M380 440 L380 460" class="d-arrow"/>
+  <path d="M640 485 L754 485 L754 22 L512 22" class="d-arrow-b"/><text x="640" y="16" text-anchor="middle" class="d-ts" fill="#1f6fd1">the robot moved: new measurements</text>
+</svg>
+<figcaption><b>Figure 1.2</b> The architecture. Each box names the file that implements it. The blue arrow closes the loop: every move changes what the sensors see next.</figcaption>
+</figure>
+
+<div class="box tip"><b>Interview tip: separate the questions</b>
+<p>A strong answer never says "Dijkstra makes the robot intelligent". Each layer answers a different question:
+<i>coverage</i>: which unsearched area next? <i>strategy</i>: which robot takes it? <i>planner</i>: which route gets there?
+<i>motion</i>: how does the robot physically follow it? <i>perception</i>: is that a person? Being able to say which layer does what,
+and why they are separate, is the single most important thing to take from this guide.</p></div>
+
+<h2>1.3 What a mission looks like</h2>
+<figure><img src="../../results/pictures.png">
+<figcaption><b>Figure 1.3</b> One mission, three pictures of it on the dashboard. <b>Left</b>, the building as it is, with the robots' findings (green rings are confirmed
+victims, red ✕ are false alarms). <b>Middle</b>, what the lasers mapped. People lying on the floor stay dark because the beams pass over them.
+<b>Right</b>, what the thermal cameras measured. Warm things glow, and hatched floor has not been looked at yet.</figcaption></figure>
+
+<p>A typical mission with 4 robots in the default 28 m × 20 m building takes a few minutes of simulated time. By the end, the whole reachable
+floor has been searched by a camera, most victims are confirmed, and every robot is back at the base (the blue tent at the entrance, where
+rescuers wait). The dashboard shows each robot's current goal, its reason in plain words, its planned route and what its planner looked at.</p>
+
+<table>
+<tr><th>Fact</th><th>Value (default)</th><th>Where it is set</th></tr>
+<tr><td>Floor size</td><td>56 × 40 cells of 0.5 m = 28 m × 20 m</td><td><code>RescueConfig.width/height/cell</code></td></tr>
+<tr><td>Simulation step</td><td>1 second; a mission ends at 900 s or when every robot is done</td><td><code>max_steps</code></td></tr>
+<tr><td>Robots</td><td>4 (1–8 on the dashboard), start at the entrance</td><td><code>n_robots</code></td></tr>
+<tr><td>Victims</td><td>10 (hidden number, 4–12, when "unknown" is chosen)</td><td><code>n_victims</code></td></tr>
+<tr><td>Things that look like people</td><td>12 look-alikes (jackets, bags...) + 6 warm objects (dogs, heaters...)</td><td><code>n_decoys, n_warm_objects</code></td></tr>
+<tr><td>Driving speed</td><td>0.5 m/s, turning 180°/s</td><td><code>speed, turn_rate</code></td></tr>
+</table>

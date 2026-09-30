@@ -1,0 +1,98 @@
+<h1><span class="num">13</span>Software architecture</h1>
+<p class="lead">The project is about 9,000 lines: a Python package <code>rescue/</code> (simulation, AI and a small web server), a JavaScript 3-D front end that uses
+three.js, scripts for experiments, and 92 automated tests. Nothing needs a GPU; PyTorch is used on the CPU for the detector.</p>
+
+<h2>13.1 Modules</h2>
+<table>
+<tr><th>File</th><th>Lines</th><th>Responsibility</th></tr>
+<tr><td><code>config.py</code></td><td>97</td><td>every tunable parameter in one dataclass, <code>RescueConfig</code></td></tr>
+<tr><td><code>world.py</code></td><td>699</td><td>procedural buildings: layouts, collapse, furniture, rubble, victims, look-alikes, fine heightfield</td></tr>
+<tr><td><code>thermal.py</code></td><td>199</td><td>temperatures: ambient, bodies, covers, warm objects, engines; ironbow palette</td></tr>
+<tr><td><code>lidar.py</code></td><td>108</td><td>LiDAR ray casting, noise, dropout, inverse sensor model</td></tr>
+<tr><td><code>sensors.py</code></td><td>159</td><td>camera rendering (colour, depth, thermal, 3-D points), visible cells, line of sight</td></tr>
+<tr><td><code>mapping.py</code></td><td>187</td><td>evidence grid, classify, merge, searched view, frontiers, Dijkstra distance field</td></tr>
+<tr><td><code>perception.py</code></td><td>314</td><td>the CNN: dataset rendering, training, evaluation, detection</td></tr>
+<tr><td><code>victims.py</code></td><td>172</td><td>reports, candidates, the belief filter, team verdicts, one report per person</td></tr>
+<tr><td><code>coverage.py</code></td><td>267</td><td>lane spacing, regions, lawnmower and spiral patterns, waypoints, Hungarian assignment</td></tr>
+<tr><td><code>coordination.py</code></td><td>341</td><td>goals, sweep following, random / greedy / partition / auction strategies</td></tr>
+<tr><td><code>planners.py</code></td><td>482</td><td>Dijkstra, A*, RRT*, ant colony, route validation</td></tr>
+<tr><td><code>motion.py</code></td><td>182</td><td>kinematics, energy model, DWA, loop detection</td></tr>
+<tr><td><code>simulator.py</code></td><td>1,104</td><td>the mission: robots, base, the one-second loop, decisions, moves, batteries, recovery, scoring</td></tr>
+<tr><td><code>metrics.py</code></td><td>163</td><td>everything measured against the ground truth</td></tr>
+<tr><td><code>server.py</code></td><td>610</td><td>HTTP server: sessions, JSON state for the page, algorithm comparison jobs</td></tr>
+<tr><td><code>__main__.py</code></td><td>235</td><td>command line: <code>serve</code>, <code>simulate</code>, <code>train</code>, <code>benchmark</code></td></tr>
+<tr><td><code>web/js/*.js</code></td><td>2,300</td><td>the dashboard: scene, building meshes, robots, floor painting, panels, charts, controls</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 760 300" width="760">
+  <g font-size="11">
+  <rect x="10" y="10" width="140" height="36" rx="6" class="d-grey"/><text x="80" y="33" text-anchor="middle" class="d-tb">config.py</text>
+  <rect x="190" y="10" width="140" height="36" rx="6" class="d-box"/><text x="260" y="33" text-anchor="middle" class="d-tb">world.py</text>
+  <rect x="370" y="10" width="140" height="36" rx="6" class="d-warm"/><text x="440" y="33" text-anchor="middle" class="d-tb">thermal.py</text>
+  <rect x="190" y="80" width="140" height="36" rx="6" class="d-box"/><text x="260" y="103" text-anchor="middle" class="d-tb">lidar.py · sensors.py</text>
+  <rect x="370" y="80" width="140" height="36" rx="6" class="d-warm"/><text x="440" y="103" text-anchor="middle" class="d-tb">perception.py</text>
+  <rect x="550" y="80" width="140" height="36" rx="6" class="d-warm"/><text x="620" y="103" text-anchor="middle" class="d-tb">victims.py</text>
+  <rect x="10" y="150" width="140" height="36" rx="6" class="d-violet"/><text x="80" y="173" text-anchor="middle" class="d-tb">mapping.py</text>
+  <rect x="190" y="150" width="140" height="36" rx="6" class="d-green"/><text x="260" y="173" text-anchor="middle" class="d-tb">coverage.py</text>
+  <rect x="370" y="150" width="140" height="36" rx="6" class="d-green"/><text x="440" y="173" text-anchor="middle" class="d-tb">coordination.py</text>
+  <rect x="550" y="150" width="140" height="36" rx="6" class="d-green"/><text x="620" y="173" text-anchor="middle" class="d-tb">planners.py · motion.py</text>
+  <rect x="220" y="215" width="320" height="36" rx="6" class="d-red"/><text x="380" y="238" text-anchor="middle" class="d-tb">simulator.py  (the mission loop)</text>
+  <rect x="40" y="262" width="150" height="32" rx="6" class="d-grey"/><text x="115" y="283" text-anchor="middle" class="d-tb">metrics.py</text>
+  <rect x="300" y="262" width="160" height="32" rx="6" class="d-grey"/><text x="380" y="283" text-anchor="middle" class="d-tb">server.py → browser</text>
+  <rect x="570" y="262" width="150" height="32" rx="6" class="d-grey"/><text x="645" y="283" text-anchor="middle" class="d-tb">scripts / tests</text>
+  <path d="M150 28H188M330 28H368M260 46V78M440 46V78M510 98H548M80 186 L300 213M260 186 L340 213M440 186 L400 213M620 186 L470 213M620 116 L520 213M260 116 L320 213" class="d-arrow"/>
+  <path d="M300 251 L150 262M380 251V260M460 251 L610 262" class="d-arrow"/>
+  </g>
+</svg>
+<figcaption><b>Figure 13.1</b> Who uses whom. The simulator owns the mission and calls into every module. Everything above it knows nothing about the web page, so the same
+simulation runs in the dashboard, the command line, the tests and the experiment scripts.</figcaption>
+</figure>
+
+<h2>13.2 One step in code</h2>
+<pre>Simulator.step():
+    for each robot:  _sense(r)       # lidar.scan → mapping.apply_lidar; sensors.visible_cells → apply_camera;
+                                     # sensors.render → detector.detect → _report (into the robot's outbox)
+    _groups = groups()               # who can talk to whom (radio range, walls)
+    _communicate()                   # merge maps; apply new reports in id order; registry.settle → verdicts
+    _decide()                        # distance fields; special goals; coordination.choose; _route → planners.plan
+    _act()                           # scans, looks, charging; conflict-free moves; energy; dead-end recovery
+    _score()                         # ground-truth bookkeeping for the metrics</pre>
+
+<h2>13.3 The dashboard: server and browser</h2>
+<p>The server is a small standard-library HTTP server (<code>ThreadingHTTPServer</code>). Each browser gets its own <b>session</b> (its own simulator), so two people can run
+different missions at once. The browser asks for batches of steps and draws the result:</p>
+<table>
+<tr><th>Endpoint</th><th>Returns</th></tr>
+<tr><td><code>/api/reset?building=…&amp;robots=…</code></td><td>a new mission with those settings; the world (walls, furniture, zones, patterns) as JSON</td></tr>
+<tr><td><code>/api/step?n=K</code></td><td>advance K seconds; the new state: robots (position, goal, route, reason, plan, battery, pattern, track), team map, searched cells, thermal map, frontiers, candidates, metrics, log</td></tr>
+<tr><td><code>/api/camera</code></td><td>the selected robot's colour / thermal images and heatmap as PNG</td></tr>
+<tr><td><code>/api/compare</code></td><td>starts a background job that runs the same mission once per option (planner, pattern, avoidance, strategy)</td></tr>
+<tr><td><code>/api/victim_map</code>, <code>/api/reveal</code></td><td>the exportable victim map; reveal the ground truth when the count is unknown</td></tr>
+</table>
+<p>Large grids are sent compactly: the team map as one character per cell, the searched layer as bits, the thermal map as bytes. The front end (plain ES modules, no build step)
+builds the building once with instanced meshes, then each step repaints the floor texture (map, searched fog, frontiers, patterns, tracks) and moves the robots, gliding
+between states for smooth animation.</p>
+
+<h2>13.4 Tests and scripts</h2>
+<p><b>92 tests</b> (<code>pytest</code>, about 6 minutes) check the maths and the behaviour: A* returns Dijkstra's optimal length while expanding fewer cells; the octile heuristic
+never overestimates; every planner returns a valid route never shorter than the optimum; Bresenham lines have octile length; RRT* tree costs stay consistent after rewiring;
+lanes are at most w apart; spirals go outside-in and always turn the same way; robots really drive their patterns (every reached waypoint was driven through, the median
+distance from the pattern is at most 0.36 m); every navigation option searches 100 % of the building; robots never drive faster than their speed; the same settings give the same
+mission; batteries never run flat and recharging resumes the pattern; robots sharing their reports always agree; no object ever cuts off part of a building; and the dashboard's
+numbers add up.</p>
+<table>
+<tr><th>Command</th><th>Does</th></tr>
+<tr><td><code>python -m rescue serve</code></td><td>start the dashboard</td></tr>
+<tr><td><code>python -m rescue simulate --strategy coordinated</code></td><td>run one mission on the command line and print its metrics</td></tr>
+<tr><td><code>python -m rescue train</code></td><td>render 20,000 labelled images and train the three detectors (about 50 minutes each on a CPU)</td></tr>
+<tr><td><code>python -m rescue benchmark --seeds 8</code></td><td>compare strategies and vision modes over many buildings</td></tr>
+<tr><td><code>python scripts/check_algorithms.py</code></td><td>planners and coverage patterns on the test ground → <code>results/algorithms/</code></td></tr>
+<tr><td><code>python scripts/reliability.py</code></td><td>every confirmation checked against the truth → <code>results/reliability/report.md</code></td></tr>
+<tr><td><code>python -m pytest</code></td><td>the 92 tests</td></tr>
+</table>
+
+<div class="box tip"><b>Interview tip: "how is your code structured?"</b>
+<p>"Layered, like the robot's own architecture: world and sensors, then maps and perception, then decisions and motion, with one simulator class owning the loop. The simulation
+has no dependency on the UI, so the same code runs the web dashboard, the CLI, experiments and tests. All parameters live in one config dataclass, and every random choice comes from
+seeded generators, so any mission can be reproduced exactly."</p></div>

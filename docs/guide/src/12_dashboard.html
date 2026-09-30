@@ -1,0 +1,74 @@
+<h1><span class="num">12</span>Every control on the dashboard</h1>
+<p class="lead">Start the dashboard with <code>python -m rescue serve</code> and open the address it prints. Setup is on the left, the 3-D view in the middle and the
+details on the right. Changing the building or the damage creates a new building. Every other change restarts the mission <i>in the same building</i>, so you can
+compare settings fairly. A mission waits for <span class="kbd">Start</span>.</p>
+
+<figure><img src="img/dashboard_now.png">
+<figcaption><b>Figure 12.1</b> The dashboard during a hospital mission with a different battery per robot. The Robots tab (right) gives each robot's state and its reason in plain words.
+Here R1 "won the auction, utility 4.6 = value 6.0 − 0.5 × 2.7 m", and R0 is going home because with 41 % of its 2 Wh battery it cannot reach any remaining task and come back.
+Below each reason: the planner used, route length, cells expanded, time, energy and battery.</figcaption></figure>
+
+<h2>12.1 Setup panel (left)</h2>
+<table>
+<tr><th style="width:18%">Control</th><th style="width:22%">Options</th><th>What changes in the robots' behaviour</th></tr>
+<tr><td><b>Building</b></td><td>office, apartments, hospital, school, parking, warehouse, open test ground</td><td>A new building of that type (chapter 3). Layouts change how useful each coverage pattern is: long corridors favour frontier exploration, open halls the lawnmower.</td></tr>
+<tr><td><b>Damage</b></td><td>light, moderate, severe</td><td>More collapsed walls, rubble and buried victims (10/25/45 % of interior walls collapse; 20/40/60 % of victims partly buried; up to 20 % under thick rubble).</td></tr>
+<tr><td><b>Rubble</b></td><td>0–3×</td><td>Multiplies the number of rubble piles: more obstacles, more replanning, more hidden victims.</td></tr>
+<tr><td><b>New random building</b></td><td>button</td><td>Same type, new seed, so a different layout.</td></tr>
+<tr><td><b>Number inside</b></td><td>Unknown / Known (+ how many, 1–16)</td><td><i>Unknown</i> (realistic): 4–12 hidden victims, and the robots search everything. <i>Known</i>: they stop and go home once that many are confirmed (a false alarm can make them stop early).</td></tr>
+<tr><td><b>Robots</b></td><td>1–8</td><td>Team size. Patterns split the building into that many rectangles; strategies spread that many robots.</td></tr>
+<tr><td><b>Strategy</b></td><td>coordinated, partition, greedy, random</td><td>Who takes which frontier or sighting (8.5). With lawnmower or spiral: used for the mop-up after the patterns.</td></tr>
+<tr><td><b>Runs</b></td><td>Repeat / Vary</td><td><i>Repeat</i>: same settings, the same mission move for move. <i>Vary</i>: the same building, but new random numbers for sensor noise, tie-breaks, RRT* samples and ants, so paths differ.</td></tr>
+<tr><td><b>Path planner</b></td><td>Dijkstra, A*, RRT*, ant colony</td><td>The route to each goal (chapter 9). Goals are chosen the same way whatever planner is selected.</td></tr>
+<tr><td><b>Coverage</b></td><td>frontier, lawnmower, spiral</td><td>How space is swept (8.4). Lawnmower and spiral show each robot's dashed pattern and its track.</td></tr>
+<tr><td><b>Obstacles</b></td><td>Follow route / DWA</td><td>Follow the route and wait for teammates, or choose each move with the Dynamic Window Approach (10.2).</td></tr>
+<tr><td><b>Revisits</b></td><td>Allowed / Avoid</td><td><i>Avoid</i>: every cell costs 0.3 extra per earlier team visit (up to 5), so routes prefer fresh ground (10.6).</td></tr>
+<tr><td><b>Dead ends</b></td><td>Recover / Off</td><td>Detect loops and blockages, back off and put the goal on a 60 s tabu list (10.5). <i>Off</i> shows what happens without it.</td></tr>
+<tr><td><b>Speed</b></td><td>0.2–1.5 m/s</td><td>Faster robots finish sooner, but the cameras still look once per second, and motor losses grow with speed².</td></tr>
+<tr><td><b>Battery</b></td><td>unlimited, 10…1 Wh, different per robot</td><td>Energy-aware task choice, turning home in time, recharging (chapter 11). <i>Different per robot</i> shows one choice per robot.</td></tr>
+<tr><td><b>At base</b></td><td>Recharge / Stay</td><td>After coming home on low battery: charge at 60 W and go back out, or stay home.</td></tr>
+<tr><td><b>Sensors on the robots</b></td><td>Combined / Vision + Thermal / LiDAR</td><td><i>Combined</i>: the LiDAR maps, the cameras find people. <i>Vision + Thermal</i>: no LiDAR, so the map grows only where the depth camera looks. <i>LiDAR</i>: no camera, so the building gets mapped but <b>nobody can be found</b>.</td></tr>
+<tr><td><b>Camera / LiDAR range</b></td><td>2–8 m / 3–20 m</td><td>How far each sensor reaches. The camera range also sets the lawnmower's lane spacing.</td></tr>
+</table>
+
+<h2>12.2 The 3-D view (middle)</h2>
+<ul>
+<li><b>Show as</b>: <i>Combined</i> (the building as it is, plus findings), <i>LiDAR</i> (only what the lasers know: violet where beams hit), <i>Thermal</i> (only what the thermal cameras measured,
+hatched where nobody looked). Keys <span class="kbd">1</span> <span class="kbd">2</span> <span class="kbd">3</span>.</li>
+<li><b>Camera views</b>: overview, top-down, follow the selected robot. Drag to rotate, right-drag to move, scroll to zoom, double-click to select and zoom.</li>
+<li><b>Layers</b>: victim flags, fog over unmapped/unsearched floor, robot paths and goals, coverage patterns, where each robot has driven, camera cones, sightings and false alarms,
+zones, the planner search of the selected robot (cells examined, RRT* tree, ant trails), and repeat visits.</li>
+<li><b>Legend</b>: what every colour means in the current picture.</li>
+<li><b>Transport</b>: Start / Pause, +1 s (one step), speed 1×–30× simulated seconds per real second, Restart.</li>
+</ul>
+
+<h2>12.3 Details panel (right)</h2>
+<table>
+<tr><th>Tab</th><th>Shows</th></tr>
+<tr><td>Victims</td><td>confirmed = real + false + counted twice; every victim and how they lie; every false alarm with what it really was (ground truth, simulation only)</td></tr>
+<tr><td>Robots</td><td>state, reason, pattern progress, route (planner, length, work, time), energy, battery, repeat moves, replans, dead ends, waits</td></tr>
+<tr><td>Sensors</td><td>the selected robot's thermal image, colour image (with the AI's heatmap and detections) and LiDAR scan (Figure 12.2)</td></tr>
+<tr><td>Map</td><td>the team's victim map (what rescuers would get), exportable as JSON</td></tr>
+<tr><td>Stats</td><td>curves of searched / mapped / found over time, all metrics, and <b>Compare algorithms</b>: run the same mission once per planner, pattern, avoidance or strategy</td></tr>
+<tr><td>Log</td><td>every event in plain words: sightings, confirmations, rejections, replans, dead ends, battery decisions</td></tr>
+</table>
+
+<div class="two">
+<figure style="margin-top:0"><img src="../../results/cameras.png" style="max-height:120mm">
+<figcaption><b>Figure 12.2</b> The Sensors tab: the thermal image (crosshair on the warmest pixel), the colour image as the AI sees it, and the LiDAR scan with the camera's field
+of view as a blue wedge.</figcaption></figure>
+<div>
+<div class="box code"><b>Presets in the address bar</b>
+<p>Any setup can be put in the URL, which is handy for demos and tests:</p>
+<pre>http://localhost:8001/?building=plain
+  &amp;coverage=spiral&amp;robots=2
+  &amp;planner=astar&amp;battery_each=1.5,3
+  &amp;recharge=1&amp;view=top&amp;autostart=1
+  &amp;speed=12&amp;seed=42</pre>
+<p>Other keys: <code>damage</code>, <code>sensors</code>, <code>show</code>, <code>known</code>, <code>victims</code>, <code>strategy</code>, <code>avoidance</code>,
+<code>revisit=0.3</code>, <code>deadend=0</code>, <code>rspeed</code>, <code>battery</code>, <code>camrange</code>, <code>lidarrange</code>, <code>density</code>, <code>vary=1</code>,
+<code>tab</code>, <code>legend=1</code>.</p></div>
+<div class="box simple"><b>A good first experiment</b>
+<p>Open test ground, 1 robot, Coverage = Spiral, Speed 30×, Layers: coverage patterns + where each robot has driven. Watch the robot follow the rings, skip a waypoint on a victim
+and check a sighting. Then switch the planner to RRT* and watch the any-angle routes, or set Battery = 1.5 Wh to watch it go home, charge and resume.</p></div>
+</div></div>

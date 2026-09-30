@@ -29,6 +29,7 @@ def mean_time(rows, key, cap=900):
 def main():
     base = RescueConfig(vision="ideal")
     from rescue.world import BUILDINGS
+    BUILDINGS = [b for b in BUILDINGS if b != "plain"]          # damaged buildings only, not the test ground
     team = [(n, s, replace(base, strategy=s, n_robots=n, building=BUILDINGS[k % len(BUILDINGS)], seed=k))
             for n in (1, 2, 4, 6, 8) for s in ("greedy", "coordinated") for k in SEEDS]
     with ProcessPoolExecutor() as pool:

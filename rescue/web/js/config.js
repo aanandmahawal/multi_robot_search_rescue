@@ -14,6 +14,7 @@ export const STATE_TEXT = {
   exploring: "exploring", scanning: "scanning 360°", verifying: "looking closely", verifying_trip: "going to check a sighting",
   transit: "driving to its zone", returning: "returning to base", reporting: "driving back into radio range",
   done: "finished, at base", idle: "deciding", backtracking: "backing out of a dead end",
+  sweeping: "following its coverage pattern", charging: "charging at the base",
 };
 
 export const PLANNER_NAMES = { dijkstra: "Dijkstra", astar: "A*", rrtstar: "RRT*", aco: "Ant colony" };
@@ -44,6 +45,8 @@ export const LAYERS = [
   ["flags", "Victim flags and bodies"],
   ["fog", "Shade what is not mapped / not searched"],
   ["paths", "Robot paths and goals"],
+  ["pattern", "Coverage patterns (lawnmower / spiral)"],
+  ["trail", "Where each robot has driven"],
   ["fov", "Camera view cones"],
   ["sightings", "Sightings and false alarms"],
   ["zones", "Zones (partition strategy)"],
@@ -62,13 +65,13 @@ export const EXPLAIN = {
   planner: {
     dijkstra: "Dijkstra: expands cells in order of their route cost g from the robot, so it always finds the shortest route, but it searches evenly in all directions. The same distance field also tells the robot how far every goal is, which it needs to choose a goal.",
     astar: "A*: expands cells in order of f = g + h, where h is the octile distance to the goal, max(dx, dy) + 0.41·min(dx, dy): the exact distance on an empty grid. h never overestimates, so A* finds the same shortest route as Dijkstra while looking at far fewer cells.",
-    rrtstar: "RRT*: grows random trees of straight lines from the robot and from the goal until they meet, joining every new point through its cheapest neighbour and rewiring neighbours through it when that is shorter (radius γ·√(log n / n)). Once a route is found, it samples only inside the ellipse |p−start| + |p−goal| ≤ best cost (Informed RRT*). Routes are straight lines at any angle, but differ from run to run and narrow doors are hard to find by chance; then it falls back to A*.",
-    aco: "Ant colony: 10 ants walk from the robot towards the goal. At each cell an ant picks the next with probability ∝ τ^α · η^β (τ pheromone, η = 1 / (step + distance to goal), α = 1, β = 4). Ants that arrive lay pheromone Q / L (shorter routes lay more), pheromone evaporates by ρ = 0.3 per round, and the best route is reinforced. It stops when the best route has not improved for 3 rounds.",
+    rrtstar: "RRT*: grows random trees of straight lines from the robot and from the goal until they meet, joining every new point through its cheapest neighbour and rewiring neighbours through it when that is shorter (radius γ·√(log n / n)); a rewired point passes its saving on to everything below it. Once a route is found, it samples only inside the ellipse |p−start| + |p−goal| ≤ best cost (Informed RRT*). The straight lines are drawn onto the grid with Bresenham's algorithm, so each costs exactly its octile length. Routes differ from run to run and narrow doors are hard to find by chance; then it falls back to A*.",
+    aco: "Ant colony: 10 ants walk from the robot towards the goal. At cell i an ant picks the next cell j with probability ∝ τ_j^α · η_j^β, where τ is pheromone and η_j = 1 / (1 + detour), detour = step + h(j) − h(i) ≥ 0 being how much longer the move makes the best route still possible (h = octile distance to the goal; 0 when heading straight for it). α = 1, β = 4. Ants that arrive lay pheromone Q / L (shorter routes lay more), pheromone evaporates by ρ = 0.3 per round, and the best route is reinforced. It stops when the best route has not improved for 3 rounds.",
   },
   coverage: {
     frontier: "Frontier-based: go to the edge of the searched area where the most unsearched space is, weighed against the distance (value − 0.5 × metres). Adapts to any layout; the default.",
-    boustrophedon: "Lawnmower (boustrophedon): the building is cut into lanes one camera range wide; lane k = floor(y / w) is swept left to right when k is even and right to left when k is odd. Goals next in that order are worth up to 12 utility points more (= 24 m of driving). Systematic, fewer gaps, but more driving in a building full of walls.",
-    spiral: "Spiral: ring k = floor(distance to the outer wall / w), searched from the outside in; inside a ring the robot goes round clockwise from the entrance. Goals next in that order are worth up to 12 utility points more.",
+    boustrophedon: "Lawnmower (boustrophedon): the building is split into one rectangle per robot (as square as possible). Each robot sweeps its rectangle in K = ⌈D / w⌉ parallel lanes along the longer side (fewest turns), D / K apart, alternating direction, starting in the corner nearest to it. It drives from waypoint to waypoint (every 1.5 m) with the chosen planner, assumes unmapped ground is free, and skips waypoints inside obstacles. Afterwards it searches what the lanes missed (behind obstacles) by frontier exploration.",
+    spiral: "Spiral: the building is split into one rectangle per robot. Each robot drives round its rectangle from the outside in: top edge, right edge, bottom edge, left edge, and every edge moves in by one lane spacing once driven, until the edges meet. Passes are at most w apart, as in the lawnmower. Afterwards the robot searches what the spiral missed by frontier exploration.",
   },
   avoidance: {
     none: "Follow the route: the robot drives cell by cell along its planned route. When the LiDAR or camera shows a new obstacle on the route, it replans at once; when a teammate is in the way it waits, and after 3 s it plans around it.",
@@ -83,7 +86,11 @@ export const EXPLAIN = {
     "0": "Off: robots only rely on the normal replanning; a robot can stay stuck in a loop.",
   },
   speed: "Driving speed in m/s. A robot turns on the spot (180°/s), then drives: a move takes |turn| / 180°/s + distance / speed, so diagonal steps (0.71 m) take longer than straight ones (0.5 m). Faster robots finish sooner, but the cameras look once per second, so they see less on the way, and motor losses grow with speed².",
-  battery: "Battery capacity. Power: computer 15 W + LiDAR 8 W + cameras 6 W all the time, plus driving m·g·C_rr / η = 20 J per metre (25 kg, C_rr 0.05, η 0.6) + motor losses 12·v² W, plus turning. A robot heads home when the charge left is only 1.3 × what the drive back needs plus a 5 % reserve; at zero it stops where it is.",
+  battery: "Battery capacity, the same for every robot or different per robot. Power: computer 15 W + LiDAR 8 W + cameras 6 W all the time, plus driving m·g·C_rr / η = 20 J per metre (25 kg, C_rr 0.05, η 0.6) + motor losses 12·v² W, plus turning: about 42 W while driving at 0.5 m/s, so 1 Wh lasts roughly 85 s. Before taking a task, a robot checks it can drive there, work, and still get back: 1.3 × (energy there + energy back) + 5 % reserve must fit in what is left; tasks that do not fit are left for others. On the way it heads home as soon as only 1.3 × the drive back + 5 % is left. This floor is small (28 × 20 m), so only small batteries (1-3 Wh) run low within a mission; a real robot carries a few hundred Wh for a much larger site.",
+  recharge: {
+    "1": "Recharge: a robot that came home on low battery docks at the base (60 W charger: 1 Wh per minute), charges to full and goes back out, continuing its coverage pattern where it left it.",
+    "0": "Stay: a robot that came home on low battery stays at the base for the rest of the mission; its unfinished area is left to its teammates.",
+  },
   ranges: "How far the sensors reach. The camera range limits how far a robot can search for people (and sets the lawnmower lane width); the LiDAR range how far it maps walls. Longer range = fewer trips.",
   building: {
     office: "Open-plan office: clusters of desks, meeting rooms and private offices along the walls, and a solid lift/stair core in the middle.",
@@ -92,6 +99,7 @@ export const EXPLAIN = {
     school: "School: classrooms with rows of desks along a corridor, and a large gym with bleachers.",
     parking: "Parking garage: two rows of parked cars, pillars and a wide driving lane. Cars block the cameras and the laser; some still have a warm engine.",
     warehouse: "Warehouse: offices along the top and a big hall with pillars and tall storage racks that block the view.",
+    plain: "Open test ground: one empty hall with a few fixed obstacles (a block in the middle, two crates, cabinets in the four corners, shelves and counters along the walls) and a painted 2 m grid. No rubble, no look-alikes, no warm objects: made to watch how the coverage patterns and route planners behave. The obstacles are the same every time; only the victims move."
   },
   damage: {
     light: "Light: few collapsed walls, little rubble. About 20 % of victims are partly buried and 5 % lie under thin debris.",

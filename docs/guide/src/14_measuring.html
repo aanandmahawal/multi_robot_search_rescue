@@ -1,0 +1,56 @@
+<h1><span class="num">14</span>How good is it? Measuring</h1>
+<p class="lead">A simulation is only useful if you can measure it honestly. The robots never see the ground truth, but the scoring code does: after every mission it checks
+every confirmed "person" against where people really are.</p>
+
+<h2>14.1 What is measured</h2>
+<table>
+<tr><th>Metric</th><th>Meaning</th></tr>
+<tr><td><b>searched (coverage)</b></td><td>share of the reachable floor that some camera has looked at</td></tr>
+<tr><td><b>mapped</b></td><td>share of the reachable floor on the team map (LiDAR or camera)</td></tr>
+<tr><td><b>found / recall</b></td><td>victims with a confirmed report within 1.5 m (one report per person); recall on <i>detectable</i> victims excludes those under thick rubble</td></tr>
+<tr><td><b>precision, false alarms</b></td><td>share of confirmed reports that were real people; the rest split into warm objects, look-alikes, nothing, and people counted twice</td></tr>
+<tr><td><b>time to first / 50 % / all victims</b></td><td>seconds until those were confirmed; time 90 % searched / mapped</td></tr>
+<tr><td><b>distance, energy, recharges</b></td><td>team totals</td></tr>
+<tr><td><b>redundancy, repeat moves</b></td><td>how many cameras looked at each cell on average; share of moves into cells already driven through</td></tr>
+<tr><td><b>waits, replans, dead ends, bumps</b></td><td>how often robots had to react (chapter 10)</td></tr>
+<tr><td><b>planning time and work</b></td><td>ms and cells / samples / ant steps per route</td></tr>
+</table>
+
+<h2>14.2 Reliability of the victim search (current rule)</h2>
+<p><code>scripts/reliability.py</code> runs 12 missions per sensor set (six damaged building types × 2 seeds, 4 robots, 10 victims, 12 look-alikes, 6 warm objects) and classifies
+every confirmation and every rejection by what is really there:</p>
+<table>
+<tr><th>Sensors</th><th>Victims found / findable</th><th>Confirmed</th><th>Real</th><th>Counted twice</th><th>False alarms</th><th>Precision</th><th>Seconds robots disagreed</th></tr>
+<tr><td>colour camera</td><td>80 / 102</td><td>93</td><td>79</td><td>1</td><td>13</td><td>85 %</td><td>0</td></tr>
+<tr><td>thermal camera</td><td>99 / 102</td><td>118</td><td>98</td><td>4</td><td>16</td><td>83 %</td><td>0</td></tr>
+<tr><td>colour + thermal</td><td><b>100 / 102</b></td><td>113</td><td>99</td><td>2</td><td>12</td><td><b>88 %</b></td><td>0</td></tr>
+</table>
+<p>What were the false alarms? With both cameras: a <b>dog</b> (5), <b>sun-warmed rubble</b> (3), nothing there (2), a jacket and a hot-water leak. With the thermal camera alone:
+mostly sun-warmed rubble (8). With the colour camera alone: mostly <b>bags</b> (8) and laptops (2). The colour camera misses <b>all 18</b> people under thin debris; the thermal and fused
+detectors find every one of them, because heat leaks through. No sensor finds the 18 people under thick rubble, as designed.</p>
+
+<figure><img src="img/reliability.png">
+<figcaption><b>Figure 14.1</b> The confirmation rule compared on 12 <i>unseen</i> missions per sensor set (seeds 400–401, not used for tuning). The stricter rule (detection 0.92, evidence 9, 6 frames)
+more than halves the false alarms for 1–3 fewer confirmed victims per 108. Those stay on the victim map as unconfirmed sightings.</figcaption></figure>
+
+<div class="box simple"><b>How to read precision</b>
+<p>88 % precision means roughly 1 in 9 people the fused team reports is not a person. For a real rescue that is a useful, honest number: the rescuers get a map where most flags
+are people, each with its measured temperature and how many robots saw it, and every flag is checked by a human before anyone digs.</p></div>
+
+<h2>14.3 Team strategies over 24 buildings</h2>
+<p>From the project's benchmark (4 buildings of each of the six types, seeds 200+, 4 robots, 900 s limit, perfect eyes so only teamwork is compared):</p>
+<table>
+<tr><th>Strategy</th><th>50 % of victims found</th><th>all found</th><th>90 % searched</th><th>distance driven</th><th>redundancy</th></tr>
+<tr><td>random</td><td>267 s</td><td>617 s (11/24 runs)</td><td>553 s</td><td>1,797 m</td><td>3.36</td></tr>
+<tr><td>greedy</td><td>82 s</td><td>165 s</td><td>147 s</td><td>496 m</td><td>2.59</td></tr>
+<tr><td>partition</td><td><b>55 s</b></td><td>135 s</td><td><b>117 s</b></td><td><b>359 m</b></td><td><b>1.87</b></td></tr>
+<tr><td>coordinated</td><td>64 s</td><td><b>133 s</b></td><td>126 s</td><td>470 m</td><td>2.48</td></tr>
+</table>
+<p>Partition and the auction are clearly better than greedy and far better than random. Partition drives least, because zones never overlap. The auction is as fast to find
+everyone and keeps working when zones are unequal. With perfect eyes all four strategies eventually find 100 % of detectable victims except random (86 %).</p>
+<p class="small">These benchmark tables in the README were measured before the confirmation-rule change; the navigation comparison (perfect eyes) is not affected by it.</p>
+
+<h2>14.4 Navigation checks on the test ground</h2>
+<p><code>scripts/check_algorithms.py</code> verifies the algorithms against known answers (chapter 9 has the planner table): all four planners return valid routes, Dijkstra and A* are exactly
+optimal, RRT* and the ants are within about 1 % on average. With 1 robot the lawnmower sweeps 4 lanes (108 m), reaches 75 of 77 waypoints, keeps within 0.21 m of its lanes on average
+and has searched 97.3 % when done; the spiral (2 rings, 95 m) reaches 67 of 68 waypoints, 0.29 m, 97.5 %. The frontier mop-up finishes the last few percent behind obstacles.</p>

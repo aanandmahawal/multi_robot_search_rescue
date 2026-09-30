@@ -1,0 +1,126 @@
+<h1><span class="num">7</span>Finding people: the machine-learning detector</h1>
+<p class="lead">Recognising a person in a noisy, dark, partly buried scene is the one job in this project that simple rules cannot do well. A temperature threshold
+would flag every dog and puddle of hot water, and a colour rule would flag every red jacket. So the project trains a small <b>convolutional neural network (CNN)</b>
+on images rendered by the simulator itself, then wraps its output in a statistical filter that only reports a person after repeated, close looks.</p>
+
+<figure>
+<svg viewBox="0 0 760 120" width="760">
+  <rect x="5" y="25" width="95" height="60" rx="6" class="d-box"/><text x="52" y="50" text-anchor="middle" class="d-tb">camera</text><text x="52" y="67" text-anchor="middle" class="d-ts">colour·depth·°C</text>
+  <rect x="115" y="25" width="95" height="60" rx="6" class="d-warm"/><text x="162" y="50" text-anchor="middle" class="d-tb">CNN</text><text x="162" y="67" text-anchor="middle" class="d-ts">12×16 heatmap</text>
+  <rect x="225" y="25" width="100" height="60" rx="6" class="d-warm"/><text x="275" y="50" text-anchor="middle" class="d-tb">peaks ≥ 0.92</text><text x="275" y="67" text-anchor="middle" class="d-ts">blobs → detections</text>
+  <rect x="340" y="25" width="100" height="60" rx="6" class="d-box"/><text x="390" y="50" text-anchor="middle" class="d-tb">depth → x, y</text><text x="390" y="67" text-anchor="middle" class="d-ts">+ °C, drop if &gt;40</text>
+  <rect x="455" y="25" width="95" height="60" rx="6" class="d-violet"/><text x="502" y="50" text-anchor="middle" class="d-tb">report</text><text x="502" y="67" text-anchor="middle" class="d-ts">shared by radio</text>
+  <rect x="565" y="25" width="95" height="60" rx="6" class="d-green"/><text x="612" y="50" text-anchor="middle" class="d-tb">belief filter</text><text x="612" y="67" text-anchor="middle" class="d-ts">log-odds per spot</text>
+  <rect x="675" y="10" width="80" height="28" rx="5" class="d-green"/><text x="715" y="29" text-anchor="middle" class="d-ts">confirmed</text>
+  <rect x="675" y="42" width="80" height="28" rx="5" class="d-grey"/><text x="715" y="61" text-anchor="middle" class="d-ts">check closer</text>
+  <rect x="675" y="74" width="80" height="28" rx="5" class="d-red"/><text x="715" y="93" text-anchor="middle" class="d-ts">rejected</text>
+  <path d="M100 55H113M210 55H223M325 55H338M440 55H453M550 55H563" class="d-arrow"/><path d="M660 50L673 25M660 55H673M660 60L673 88" class="d-arrow"/>
+</svg>
+<figcaption><b>Figure 7.1</b> From pixels to "victim found". Only the last step says "found"; everything before it produces evidence.</figcaption>
+</figure>
+
+<h2>7.1 Three detectors, one network</h2>
+<p>The same network architecture is trained three times, once per sensor set on the dashboard. The only difference is what it is given as input:</p>
+<table>
+<tr><th>Detector</th><th>Input channels</th><th>Sees people by…</th><th>Typical confusion</th></tr>
+<tr><td>colour camera (<i>cnn</i>)</td><td>R, G, B, depth (4)</td><td>shape and colours of head, shirt, trousers</td><td>bags, jackets, beams</td></tr>
+<tr><td>thermal camera</td><td>depth, temperature (2)</td><td>a warm, body-sized shape</td><td>dogs, sun-warmed rubble, hot water</td></tr>
+<tr><td>fused (colour + thermal)</td><td>R, G, B, depth, temperature (5)</td><td>both at once</td><td>fewest; dogs remain the hardest case</td></tr>
+</table>
+
+<h2>7.2 Training data made by the simulator</h2>
+<p>There is no dataset of labelled images of collapsed buildings with victims. So the simulator makes one. It generates <b>200 random disaster zones</b> (random building
+type, damage level, 8–14 victims, 10–19 look-alikes, 4–9 warm objects) and renders <b>100 camera views</b> in each, 20,000 images in all. The views are deliberately
+biased towards the interesting cases: about a third aimed at a victim from 0.8–5 m, a third aimed at a look-alike or a warm object (the <i>hard negatives</i>), and a
+third at random.</p>
+<p>Labelling is automatic, because the renderer knows which object every pixel shows. The image is cut into 4 × 4-pixel blocks (a 12 × 16 grid), and a block is
+labelled "person" when at least 15 % of its pixels show a victim that <i>this sensor could actually see</i>: exposed body parts for the colour detector, and also
+parts under thin debris (&lt; 20 cm, heat still leaks through) for the thermal and fused detectors. No network is asked to see through concrete. A separate test set
+of 40 disaster zones never used in training (4,000 images) measures how well each detector generalises.</p>
+
+<h2>7.3 The network (VictimNet)</h2>
+<figure>
+<svg viewBox="0 0 760 150" width="760">
+  <g font-size="10">
+  <rect x="5" y="30" width="70" height="70" rx="4" class="d-box"/><text x="40" y="60" text-anchor="middle" class="d-tb">input</text><text x="40" y="76" text-anchor="middle" class="d-ts">48×64×C</text>
+  <rect x="90" y="30" width="95" height="70" rx="4" class="d-warm"/><text x="137" y="55" text-anchor="middle" class="d-tb">2× conv 3×3</text><text x="137" y="71" text-anchor="middle" class="d-ts">16 filters + BN</text><text x="137" y="86" text-anchor="middle" class="d-ts">+ ReLU</text>
+  <rect x="195" y="40" width="50" height="50" rx="4" class="d-grey"/><text x="220" y="62" text-anchor="middle" class="d-ts">max</text><text x="220" y="76" text-anchor="middle" class="d-ts">pool 2</text>
+  <rect x="255" y="30" width="95" height="70" rx="4" class="d-warm"/><text x="302" y="55" text-anchor="middle" class="d-tb">2× conv 3×3</text><text x="302" y="71" text-anchor="middle" class="d-ts">32 filters</text><text x="302" y="86" text-anchor="middle" class="d-ts">24×32</text>
+  <rect x="360" y="40" width="50" height="50" rx="4" class="d-grey"/><text x="385" y="62" text-anchor="middle" class="d-ts">max</text><text x="385" y="76" text-anchor="middle" class="d-ts">pool 2</text>
+  <rect x="420" y="30" width="170" height="70" rx="4" class="d-warm"/><text x="505" y="52" text-anchor="middle" class="d-tb">3× conv 3×3, 48 filters</text><text x="505" y="68" text-anchor="middle" class="d-ts">dilation 1, 2, 4 (wider context)</text><text x="505" y="84" text-anchor="middle" class="d-ts">12×16</text>
+  <rect x="600" y="30" width="70" height="70" rx="4" class="d-warm"/><text x="635" y="60" text-anchor="middle" class="d-tb">1×1 conv</text><text x="635" y="76" text-anchor="middle" class="d-ts">→ 1 map</text>
+  <rect x="680" y="30" width="75" height="70" rx="4" class="d-green"/><text x="717" y="55" text-anchor="middle" class="d-tb">sigmoid</text><text x="717" y="71" text-anchor="middle" class="d-ts">12×16 heat-</text><text x="717" y="86" text-anchor="middle" class="d-ts">map, 0..1</text>
+  <path d="M75 65H88M185 65H193M245 65H253M350 65H358M410 65H418M590 65H598M670 65H678" class="d-arrow"/>
+  <text x="380" y="130" text-anchor="middle" class="d-ts">about 73,000 weights in total · fully convolutional: every output cell says "how likely does this 4×4 block show part of a person?"</text>
+  </g>
+</svg>
+<figcaption><b>Figure 7.2</b> The detector network (<code>perception.build_net</code>). Two poolings shrink 48 × 64 pixels to a 12 × 16 grid; dilated convolutions then let each output cell
+"see" a larger part of the image without shrinking it further.</figcaption>
+</figure>
+<p>Why this design? A <b>fully convolutional</b> network outputs a heatmap instead of a single yes/no, so one image can contain several people and each gets a position.
+<b>Batch normalisation</b> keeps training stable. <b>Dilated</b> convolutions widen the receptive field cheaply: dilation 4 on a 12 × 16 map lets a cell take in almost
+the whole body, which is needed to tell a lying person (1.75 m) from a 0.75 m dog. The whole network has only about 73,000 weights, so it runs on a CPU in
+milliseconds per frame. It is <i>not</i> YOLO or a pretrained model: it is trained from scratch on the simulator's images.</p>
+
+<h3>Training</h3>
+<ul>
+<li><b>Loss</b>: binary cross-entropy on every block (<code>BCEWithLogitsLoss</code>). Person blocks are rare (a few % of blocks), so they are up-weighted by
+√((1 − p)/p), capped at √20. Without that, the network could score well by always saying "nobody".</li>
+<li><b>Optimiser</b>: AdamW, learning rate 0.002 with cosine decay, weight decay 10<sup>−4</sup>, batches of 64, <b>20 epochs</b>.</li>
+<li><b>Augmentation</b>: half the batches are mirrored left-right (a person is still a person in a mirror).</li>
+</ul>
+<table>
+<tr><th>Detector (on 4,000 unseen test images)</th><th>ROC-AUC (image)</th><th>Heatmap average precision</th><th>Image recall</th><th>Image precision</th></tr>
+<tr><td>colour camera</td><td>0.969</td><td>0.930</td><td>93.0 %</td><td>71.5 %</td></tr>
+<tr><td>thermal camera</td><td>0.990</td><td>0.980</td><td>98.4 %</td><td>81.6 %</td></tr>
+<tr><td>colour + thermal fused</td><td>0.994</td><td>0.993</td><td>98.3 %</td><td>83.0 %</td></tr>
+</table>
+<p class="small">ROC-AUC: the probability that a random image with a person scores higher than a random image without one (1.0 = perfect). Image precision/recall at a 0.5 threshold.
+These single-image scores are only the start: the belief filter below combines many images, which is what makes the team's reports far more reliable than any single frame.</p>
+
+<h2>7.4 From heatmap to a position on the map</h2>
+<p>Every other second (every second while scanning or taking a close look) each robot runs its detector on its latest frame:</p>
+<ol>
+<li>Blocks with heat ≥ <b>0.92</b> are grouped into connected blobs; each blob is one detection with the confidence of its peak block.</li>
+<li>Inside the peak block, the <b>nearest depth reading</b> gives the distance, and the renderer's 3-D point for that pixel gives the <b>map position (x, y)</b>. This is
+exactly what a real RGB-D camera provides: pixel + depth → 3-D point.</li>
+<li>With a thermal camera, the hottest pixel of the block is attached. If it is above 40 °C, the detection is dropped (a heater or an engine, chapter 5).</li>
+<li>For every open candidate that is in clear view within 3 m but produced no detection, a <b>negative report</b> ("I looked there and saw nobody") is sent.</li>
+</ol>
+
+<h2>7.5 The belief filter: why one image is never trusted</h2>
+<p>Reports within 1.3 m of each other are fused into one <b>candidate</b> with an evidence score in log-odds (the same idea as the map in chapter 6):</p>
+<table>
+<tr><th>Event</th><th>Evidence change</th></tr>
+<tr><td>a new candidate starts at</td><td>−0.6 (most first glimpses are wrong)</td></tr>
+<tr><td>a detection with confidence p, seen from ≤ 2.5 m ("close look")</td><td>+ 1.0 × ln(p / (1 − p))</td></tr>
+<tr><td>the same, from further away</td><td>+ 0.55 × ln(p / (1 − p))</td></tr>
+<tr><td>a close look that saw nobody</td><td>− 0.9 (× 0.55 from further away)</td></tr>
+</table>
+<p>A candidate is <b>CONFIRMED</b> only when <b>all three</b> hold: evidence ≥ <b>9</b>, seen in ≥ <b>6 different camera frames</b>, and at least <b>one close look</b>
+(≤ 2.5 m). It is <b>REJECTED</b> when its evidence falls to −1.5. Uncertain candidates become <b>verify tasks</b>: a robot drives to a spot 0.7–2.2 m from the candidate
+with a clear line of sight, looks at it for 2 s, and if that was inconclusive, the next look is taken from a different side (a buried person may be visible from one angle
+only), up to 4 looks.</p>
+
+<figure><img src="img/belief.png">
+<figcaption><b>Figure 7.3</b> Evidence for sightings during one thermal mission. Green lines are real people: repeated close looks push them past 9 quickly. Red lines are other things:
+a barrel, a beam and a warm engine sink to the rejection line once robots look closely. One sun-warmed rubble pile rose above 9 but was not confirmed, because the other
+conditions (6 frames, a close look) were not met. That is exactly what they are for.</figcaption></figure>
+
+<h2>7.6 One verdict for the whole team, one report per person</h2>
+<p>Evidence is a plain sum, so the order of reports does not matter. But <i>when</i> a verdict is taken does. The project therefore takes verdicts once per second,
+after the robots have exchanged reports, and every robot applies new reports in the same order (by report id). Robots that hold the same reports then always hold
+the same verdicts. (Before this rule, in 6 test missions one robot rejected a spot another had confirmed 7 times; now it is 0.) A confirmation is final; a rejection
+is not: new, stronger evidence can reopen it.</p>
+<p>Finally, a lying body is 1.75 m long and its head and legs can look like two warm shapes. Confirmed sightings closer than 1.6 m are treated as the <b>same person</b>.
+If they are further apart, the dashboard labels the second one "⧉ counted twice", which is a counting error, not a phantom.</p>
+
+<div class="box tip"><b>Interview tip: "how does ML fit into the robot?"</b>
+<p>"ML does not drive the robot. It turns images into evidence: a heatmap of where a person might be. Classical robotics does the rest: depth turns a pixel into a map
+position, a Bayesian filter accumulates evidence over many frames and viewpoints, and the decision layer sends a robot for a closer look when the evidence is uncertain.
+The navigation stack itself is entirely algorithmic."</p></div>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>rescue/perception.py</code>: <code>build_net</code>, <code>make_dataset</code>, <code>train_detectors</code>, <code>evaluate</code>, <code>CNNDetector.detect</code>.
+Training: <code>python -m rescue train</code> (models saved in <code>models/*.pt</code> with their test scores in <code>.json</code>). <code>rescue/victims.py</code>:
+<code>Registry.apply</code> (evidence), <code>settle</code> (verdicts), <code>distinct</code> (one report per person). Negative reports: <code>Simulator._sense</code>.</p></div>

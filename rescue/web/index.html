@@ -39,6 +39,7 @@
           <option value="school">School</option>
           <option value="parking">Parking garage</option>
           <option value="warehouse" selected>Warehouse</option>
+          <option value="plain">Open test ground</option>
         </select>
         <button class="info" data-hint="hint-building" title="What is this?">i</button>
       </div>
@@ -167,15 +168,27 @@
         <label for="battery">Battery</label>
         <select id="battery">
           <option value="0" selected>Unlimited</option>
-          <option value="50">50 Wh</option>
-          <option value="20">20 Wh</option>
           <option value="10">10 Wh</option>
           <option value="5">5 Wh</option>
           <option value="3">3 Wh</option>
+          <option value="2">2 Wh</option>
+          <option value="1.5">1.5 Wh</option>
+          <option value="1">1 Wh</option>
+          <option value="each">Different per robot</option>
         </select>
         <button class="info" data-hint="hint-battery" title="What is this?">i</button>
       </div>
       <p class="hint" id="hint-battery"></p>
+      <div class="battery-each" id="batteryEach" hidden></div>
+      <div class="field" id="rechargeRow" hidden>
+        <label>At base</label>
+        <div class="seg" id="rechargeSeg">
+          <button data-recharge="1" class="on">Recharge</button>
+          <button data-recharge="0">Stay</button>
+        </div>
+        <button class="info" data-hint="hint-recharge" title="What is this?">i</button>
+      </div>
+      <p class="hint" id="hint-recharge"></p>
     </section>
 
     <section class="group">

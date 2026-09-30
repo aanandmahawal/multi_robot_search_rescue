@@ -25,12 +25,14 @@ sampling. Each new sample is joined to the tree through the neighbour that gives
 cost, and neighbours are *rewired* through it when that shortens their cost. With radius
 r(n) = gamma * sqrt(log n / n) the tree's best route converges to the optimum as samples grow. It
 does not need a grid, so its routes are made of long straight lines at any angle; here they are
-then traced back onto grid cells. Randomised: the route differs from run to run.
+then rasterised onto grid cells with Bresenham's line algorithm, whose 8-connected cell chain for a
+segment has exactly the octile length of that segment. Randomised: the route differs from run to run.
 
-**Ant Colony Optimisation** (Dorigo 1996) sends m ants from the start. At each cell an ant picks
+**Ant Colony Optimisation** (Dorigo 1996) sends m ants from the start. At each cell i an ant picks
 the next cell j with probability p_j proportional to tau_j^alpha * eta_j^beta, where tau is the
-pheromone on j and eta_j = 1 / (step cost + octile distance from j to the goal) is how promising j
-looks. Ants that reach the goal lay pheromone Q / L on their route (shorter routes lay more),
+pheromone on j and eta_j = 1 / (1 + detour_ij) is how promising j looks: detour_ij = c(i, j) + h(j)
+- h(i) >= 0 is how much the move lengthens the shortest route still possible (h = octile distance to
+the goal; 0 for every move straight towards the goal, up to 2 sqrt(2) for a step back). Ants that reach the goal lay pheromone Q / L on their route (shorter routes lay more),
 pheromone evaporates by a factor (1 - rho) each round, and the best route so far is reinforced
 (elitist ant system). After a few rounds the colony converges on a short route. Also randomised.
 
@@ -127,23 +129,53 @@ def grid_search(free: np.ndarray, start, goal, extra: np.ndarray | None = None, 
 
 
 # ------------------------------------------------------------------ RRT*
+def bresenham(a, b) -> list:
+    """Cells of the 8-connected line from cell a to cell b (Bresenham 1965), a excluded: max(|dx|, |dy|)
+    steps, min(|dx|, |dy|) of them diagonal, so its length is exactly the octile distance a-b."""
+    (x0, y0), (x1, y1) = a, b
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x1 > x0 else -1), (1 if y1 > y0 else -1)
+    err, out = dx + dy, []
+    while (x0, y0) != (x1, y1):
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
+            err += dx
+            y0 += sy
+        out.append((x0, y0))
+    return out
+
+
+def _step_into(free: np.ndarray, cells: list, cur, nxt) -> None:
+    """Append nxt; a diagonal step that would cut an obstacle's corner goes through the free side cell."""
+    dx, dy = nxt[0] - cur[0], nxt[1] - cur[1]
+    if dx and dy and not (free[cur[1], nxt[0]] and free[nxt[1], cur[0]]):
+        cells.append((nxt[0], cur[1]) if free[cur[1], nxt[0]] else (cur[0], nxt[1]))
+    cells.append(nxt)
+
+
 def _trace(free: np.ndarray, pts: list) -> list:
-    """Turn a polyline (cell-centre coordinates) into a chain of 8-connected cells without corner cutting."""
+    """Turn a polyline (cell-centre coordinates) into a chain of 8-connected cells without corner
+    cutting. Each segment is rasterised with Bresenham's algorithm; if that line touches a blocked
+    cell (it runs up to half a cell beside the exact segment), the segment is instead walked in
+    steps of 0.1 cell, recording every cell the robot's centre really enters."""
     cells = []
     cur = (int(pts[0][0]), int(pts[0][1]))
     for a, b in zip(pts, pts[1:]):
-        # walk along the segment in steps of 0.1 cell and record every cell the robot's centre enters
+        line = bresenham(cur, (int(b[0]), int(b[1])))
+        if all(free[y, x] for x, y in line):
+            for nxt in line:
+                _step_into(free, cells, cur, nxt)
+                cur = nxt
+            continue
         n = max(1, int(np.ceil(np.hypot(b[0] - a[0], b[1] - a[1]) / 0.1)))
         for k in range(1, n + 1):
-            nx, ny = int(a[0] + (b[0] - a[0]) * k / n), int(a[1] + (b[1] - a[1]) * k / n)
-            if (nx, ny) == cur:
-                continue
-            dx, dy = nx - cur[0], ny - cur[1]
-            if dx and dy and not (free[cur[1], nx] and free[ny, cur[0]]):
-                # the line crossed exactly at a corner: step through the free side cell first
-                cells.append((nx, cur[1]) if free[cur[1], nx] else (cur[0], ny))
-            cells.append((nx, ny))
-            cur = (nx, ny)
+            nxt = (int(a[0] + (b[0] - a[0]) * k / n), int(a[1] + (b[1] - a[1]) * k / n))
+            if nxt != cur:
+                _step_into(free, cells, cur, nxt)
+                cur = nxt
     return cells
 
 
@@ -230,7 +262,19 @@ def _extend(tree: _Tree, safe, q, step, gamma):
         c = tree.cost[new] + d[i]
         if i != best and c < tree.cost[i] - 1e-9 and _segment_free(safe, q, tree.p[i]):
             tree.parent[i], tree.cost[i] = new, c
+            _propagate(tree, int(i))
     return new
+
+
+def _propagate(tree: _Tree, i: int) -> None:
+    """After node i was rewired to a cheaper parent, every node below it gets cheaper by the same
+    amount: cost(child) = cost(parent) + |child - parent| must hold throughout the tree."""
+    stack = [i]
+    while stack:
+        k = stack.pop()
+        for ch in np.flatnonzero(tree.parent[:tree.n] == k):
+            tree.cost[ch] = tree.cost[k] + float(np.hypot(*(tree.p[ch] - tree.p[k])))
+            stack.append(int(ch))
 
 
 def rrt_star(free: np.ndarray, start, goal, rng: np.random.Generator, reach: np.ndarray | None = None,
@@ -317,6 +361,7 @@ def ant_colony(free: np.ndarray, start, goal, rng: np.random.Generator, extra: n
             cur, walk, seen, L = start, [], {start}, 0.0
             for _ in range(limit):
                 x, y = cur
+                h_here = octile(x, y, gx, gy)
                 opts, w = [], []
                 for dx, dy, c in MOVES:
                     nx, ny = x + dx, y + dy
@@ -325,7 +370,8 @@ def ant_colony(free: np.ndarray, start, goal, rng: np.random.Generator, extra: n
                     if dx and dy and not (free[y, nx] and free[ny, x]):
                         continue
                     step = c + (0.0 if extra is None else float(extra[ny, nx]))
-                    eta = 1.0 / (step + octile(nx, ny, gx, gy) + 1e-6)          # how promising: short step, close to goal
+                    detour = max(0.0, step + octile(nx, ny, gx, gy) - h_here)    # how much longer the best route gets
+                    eta = 1.0 / (1.0 + detour)
                     opts.append(((nx, ny), step))
                     w.append(tau[ny, nx] ** alpha * eta ** beta)
                 steps_total += 1

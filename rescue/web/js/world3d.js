@@ -6,7 +6,7 @@
 //   lidar      what the laser knows: obstacles it hit in violet, everything else dark
 //   thermal    what the thermal cameras measured: the temperature of every cell they looked at
 import * as THREE from "three";
-import { animateVictim, makeBase, makeFalseAlarm, makeRobot, makeVictim, paintVictim, setScan, setVictimStatus } from "./actors.js";
+import { animateVictim, makeBase, makeFalseAlarm, makeRobot, makeVictim, paintVictim, setRobotLabel, setScan, setVictimStatus } from "./actors.js";
 import { createBuilder } from "./builders.js";
 import { ROBOT_COLORS, VIEWS } from "./config.js";
 import { lightBuilding, onFrame, scene, setFollowTarget, setLook, setView } from "./scene.js";
@@ -144,7 +144,7 @@ function floorScene() {
   const known = state.known, searched = state.searched, W = world.W, H = world.H, P = CELL_PX, g = floorCtx;
   const b = world.config.building, pal = world.floor_palette, [tLo, tHi] = world.thermal_scale;
   const fog = layers.fog && state.t > 0;                 // before Start the building is shown as it is
-  const zonesOn = layers.zones && world.config.strategy === "partition";
+  const zonesOn = layers.zones && (world.config.strategy === "partition" || !!world.regions);
   const zoneColor = {};
   for (const [rid, z] of Object.entries(world.zone_of)) zoneColor[z] = hex(ROBOT_COLORS[rid % ROBOT_COLORS.length]);
   const frontier = new Set(state.frontiers.map(c => c[1] * W + c[0]));
@@ -171,16 +171,40 @@ function floorScene() {
     }
     const T = cellTemp(state.thermal_map, i), warm = T === null ? 0 : T - world.ambient;      // warm spots the cameras found
     if (warm >= 2.5) { const [r, gg, bb] = ironbow((T - tLo) / (tHi - tLo)); g.fillStyle = `rgba(${r},${gg},${bb},${Math.min(0.92, 0.35 + warm / 12)})`; g.fillRect(px, py, P, P); }
-    if (zonesOn) { g.fillStyle = zoneColor[world.zones[i]] + "3a"; g.fillRect(px, py, P, P); }
+    if (zonesOn) { g.fillStyle = zoneColor[world.zones[i]] + (world.regions ? "22" : "3a"); g.fillRect(px, py, P, P); }
     if (layers.visits && state.visits) {                  // driven through more than once: the more often, the redder
       const v = +state.visits[i];
       if (v > 1) { g.fillStyle = `rgba(255,60,110,${Math.min(0.65, 0.13 * (v - 1))})`; g.fillRect(px, py, P, P); }
     }
   }
-  // painted markings (parking bays, gym court)
-  g.lineWidth = 3; g.strokeStyle = b === "parking" ? "rgba(245,245,235,0.8)" : "rgba(250,250,250,0.75)";
+  // painted markings (parking bays, gym court; the test ground's 2 m grid is kept faint)
+  g.lineWidth = b === "plain" ? 1.5 : 3;
+  g.strokeStyle = b === "parking" ? "rgba(245,245,235,0.8)" : b === "plain" ? "rgba(250,250,250,0.35)" : "rgba(250,250,250,0.75)";
   const s = P / world.cell;
   for (const [x1, y1, x2, y2] of world.markings) { g.beginPath(); g.moveTo(x1 * s, y1 * s); g.lineTo(x2 * s, y2 * s); g.stroke(); }
+  drawPatterns(g, s);
+}
+
+// every robot's coverage pattern (dashed: dot = start, ring = next waypoint, red cross = skipped
+// waypoint) and the track it has really driven (solid), painted onto the floor
+function drawPatterns(g, s) {
+  const { state, layers } = store;
+  const line = pts => { g.beginPath(); pts.forEach(([x, y], k) => k ? g.lineTo(x * s, y * s) : g.moveTo(x * s, y * s)); g.stroke(); };
+  g.lineCap = "round"; g.lineJoin = "round";
+  state.robots.forEach((r, i) => {
+    const col = hex(ROBOT_COLORS[i % ROBOT_COLORS.length]), sw = r.sweep;
+    if (layers.pattern && sw) {
+      g.setLineDash([10, 7]); g.lineWidth = 4; g.strokeStyle = col; line(sw.corners); g.setLineDash([]);
+      g.fillStyle = col; g.beginPath(); g.arc(sw.corners[0][0] * s, sw.corners[0][1] * s, 9, 0, 2 * Math.PI); g.fill();
+      if (sw.next) { g.lineWidth = 3; g.beginPath(); g.arc(sw.next[0] * s, sw.next[1] * s, 10, 0, 2 * Math.PI); g.stroke(); }
+      g.strokeStyle = "#ff3b3b"; g.lineWidth = 3;
+      for (const [x, y] of sw.skipped) { const d = 8; line([[x - d / s, y - d / s], [x + d / s, y + d / s]]); line([[x - d / s, y + d / s], [x + d / s, y - d / s]]); }
+    }
+    if (layers.trail && r.track && r.track.length > 1) {
+      g.globalAlpha = 0.9; g.lineWidth = 3; g.strokeStyle = "#0b1016"; line(r.track);
+      g.lineWidth = 1.8; g.strokeStyle = col; line(r.track); g.globalAlpha = 1;
+    }
+  });
 }
 
 // ------------------------------------------------------------------ objects: real colours or sensor colours
@@ -227,7 +251,7 @@ export function updateWorld() {
   drawFloor();
   updateSensorFx(mode);
   renderHud();
-  zoneLabels.forEach(l => l.visible = mode === "combined" && layers.zones && world.config.strategy === "partition");
+  zoneLabels.forEach(l => l.visible = mode === "combined" && layers.zones && (world.config.strategy === "partition" || !!world.regions));
 
   // victims appear when the page first hears of them (unknown count: only once found)
   for (const v of state.victims) if (!victims3d[v.id]) {
@@ -262,6 +286,7 @@ export function updateWorld() {
     R.goal.visible = layers.paths && !!r.goal && r.goal.kind !== "home";
     if (r.goal) R.goal.position.set(r.goal.x, 0.6, r.goal.y);
     R.cone.visible = layers.fov && world.has_cameras && mode !== "lidar";
+    setRobotLabel(R, r, i);
     setScan(R, r, r.scan || [], world.config.lidar_height, world.has_lidar && mode !== "thermal");
   });
 }
@@ -391,6 +416,8 @@ export function renderLegend() {
             ["var(--lidar)", "dots: where the latest beams ended"], ...people].map(sw).join("");
   } else {
     const items = [...people, ["var(--frontier)", "edge of the searched area"]];
+    if (layers.pattern && world.regions) items.push(["repeating-linear-gradient(90deg,#4f9cf9 0 4px,transparent 4px 7px)", "coverage pattern (dot = start, ring = next waypoint, red × = waypoint skipped: inside an obstacle)"]);
+    if (layers.trail) items.push(["#3a78c4", "where each robot has really driven (solid line)"]);
     if (layers.search) items.push(["#9cc8ff", "planner search of the selected robot: cells examined, RRT* tree, or ant trails (yellow)"]);
     if (layers.visits) items.push(["rgba(255,60,110,0.6)", "driven through more than once (redder = more often)"]);
     if (layers.fog) {

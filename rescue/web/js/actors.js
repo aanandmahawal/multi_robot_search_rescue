@@ -73,7 +73,11 @@ export function makeFalseAlarm(c, group) {
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.66, 32),
     new THREE.MeshBasicMaterial({ color: FALSE_ALARM.color, side: THREE.DoubleSide, transparent: true, opacity: 0.9, fog: false }));
   ring.rotation.x = -Math.PI / 2; ring.position.set(c.x, 0.06, c.y);
-  const label = labelSprite("✕ false alarm", FALSE_ALARM.css, "#fff", 0.72); label.position.set(c.x, 1.25, c.y);
+  // a person already counted, confirmed again further than 1.6 m from the first report, is not a phantom
+  const twice = c.truth && c.truth.kind === "duplicate";
+  const label = labelSprite(twice ? "⧉ counted twice" : "✕ false alarm", twice ? "#f5a524" : FALSE_ALARM.css, twice ? "#1a1300" : "#fff", 0.72);
+  label.position.set(c.x, 1.25, c.y);
+  if (twice) ring.material.color.set(0xf5a524);
   group.add(ring, label);
 }
 
@@ -140,6 +144,24 @@ export function makeRobot(r, i, cfg, group) {
   dots.visible = beams.visible = false;
   group.add(dots, beams);
   return { group: g, beacon, cone, label, path, goal, dots, beams, drum, spinner: g.children.find(c => c.userData.spin) };
+}
+
+// the name tag above a robot; with a battery it also shows the charge: "R0 · 62%" (green / amber / red),
+// "⚡" while charging, "empty" once flat
+export function setRobotLabel(R, r, i) {
+  const col = hex(ROBOT_COLORS[i % ROBOT_COLORS.length]);
+  let text = "R" + r.id, bg = col, fg = "#0b1016";
+  if (r.battery != null) {
+    const pct = Math.round(100 * r.battery);
+    text += r.depleted ? " · empty" : r.state === "charging" ? ` · ⚡${pct}%` : ` · ${pct}%`;
+    if (r.depleted || pct < 20) { bg = "#e5484d"; fg = "#fff"; }
+    else if (r.low_battery || pct < 45) { bg = "#f5a524"; fg = "#1a1300"; }
+    else if (r.state === "charging") { bg = "#3fd46b"; }
+  }
+  if (R.labelText === text + bg) return;
+  R.labelText = text + bg;
+  const old = R.label; R.group.remove(old); old.material.map.dispose(); old.material.dispose();
+  R.label = labelSprite(text, bg, fg, 0.7); R.label.position.y = 1.15; R.group.add(R.label);
 }
 
 // draw a robot's LiDAR scan: `scan` is a list of [x, y] points in metres

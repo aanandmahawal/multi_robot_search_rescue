@@ -21,6 +21,11 @@ The strategies differ only in how goals are chosen:
                others, so the team spreads out; a sighting is only ever
                checked by one robot                                       (Burgard et al. 2005)
 
+With a fixed coverage pattern (``cfg.coverage`` = boustrophedon or spiral, see ``coverage.py``)
+every robot first drives its own pattern, waypoint by waypoint; it only leaves it to check a
+sighting less than VERIFY_DETOUR metres away (one robot per sighting). Once its pattern is done,
+it joins the strategy above to search whatever the patterns missed.
+
 Every chosen goal carries a plain-language ``reason`` that the dashboard shows.
 """
 from __future__ import annotations
@@ -30,8 +35,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .coverage import ORDER_METRES, ORDER_VALUE, describe as describe_order, order_scores
-from .mapping import FREE, extract_path, frontiers
+from .mapping import FREE, OBSTACLE, extract_path, frontiers
 from .sensors import line_of_sight
 
 if TYPE_CHECKING:
@@ -40,11 +44,12 @@ if TYPE_CHECKING:
 STRATEGIES = ("random", "greedy", "partition", "coordinated")
 DIST_COST = 0.5          # utility points per metre travelled
 PIECE = 10               # frontier cells per goal piece
+VERIFY_DETOUR = 6.0      # metres: a robot on a coverage pattern leaves it to check sightings this close
 
 
 @dataclass
 class Goal:
-    kind: str                     # frontier | verify | home | report | transit | probe
+    kind: str                     # frontier | verify | sweep | home | report | transit | probe | backtrack
     cell: tuple[int, int]
     value: float
     distance: float               # metres from the robot along its path
@@ -52,7 +57,7 @@ class Goal:
     look_at: tuple | None = None  # point to face on arrival
     reason: str = ""
     path: list | None = None      # precomputed path (transit goals plan through unexplored space)
-    order: float | None = None    # place in the coverage pattern: 0 = next in line, 1 = last (None: no pattern)
+    waypoint: int | None = None   # sweep goals: index of the waypoint in the robot's coverage pattern
 
 
 def _pieces(cells: np.ndarray) -> list[np.ndarray]:
@@ -85,12 +90,11 @@ def robot_goals(sim: "Simulator", r: "RobotAgent", dist: np.ndarray) -> list[Goa
             cell = (int(cand[k][0]), int(cand[k][1]))
             if any(max(abs(cell[0] - t[0]), abs(cell[1] - t[1])) <= 1 for t in tabu):
                 continue                               # a dead end I backed out of: not again for a while
-            goals.append(Goal("frontier", cell, float(len(cells)), float(dist[cell[1], cell[0]]) * cfg.cell))
-    fr = [g for g in goals if g.kind == "frontier"]
-    scores = order_scores(cfg.coverage, world, [g.cell for g in fr])
-    if scores is not None:
-        for g, s in zip(fr, scores):
-            g.order = s
+            d = float(dist[cell[1], cell[0]]) * cfg.cell
+            if not sim.affordable(r, cell, d):
+                r.unaffordable += 1                    # not enough battery to get there and back
+                continue
+            goals.append(Goal("frontier", cell, float(len(cells)), d))
     free = r.known == FREE
     for c in r.registry.open_candidates():
         cx, cy = world.to_cell(c.x, c.y)
@@ -110,6 +114,9 @@ def robot_goals(sim: "Simulator", r: "RobotAgent", dist: np.ndarray) -> list[Goa
                         best = (dist[y, x], (x, y))
         if best is not None and any(max(abs(best[1][0] - t[0]), abs(best[1][1] - t[1])) <= 1 for t in tabu):
             best = None
+        if best is not None and not sim.affordable(r, best[1], float(best[0]) * cfg.cell):
+            r.unaffordable += 1
+            best = None
         if best is not None:
             # a sighting is worth more the more likely it is to be a real person
             belief = 1.0 / (1.0 + np.exp(-c.logodds)) if cfg.verify_by_belief else 1.0
@@ -121,20 +128,89 @@ def robot_goals(sim: "Simulator", r: "RobotAgent", dist: np.ndarray) -> list[Goa
 def _describe(g: Goal, why: str, sim=None) -> Goal:
     what = (f"check possible victim at ({g.look_at[0]:.1f}, {g.look_at[1]:.1f}) m" if g.kind == "verify"
             else f"explore frontier of {g.value:.0f} cells")
-    if g.order is not None and sim is not None:
-        what += f" [{describe_order(sim.cfg.coverage, sim.world, g.cell)}, pattern score {g.order:.2f} where 0 = next in line]"
     g.reason = f"{what}, {g.distance:.1f} m away: {why}"
     return g
 
 
-def _pattern_distance(g: Goal) -> float:
-    """Greedy / partition: distance plus the coverage pattern's order (being last counts like ORDER_METRES)."""
-    return g.distance + (ORDER_METRES * g.order if g.order is not None else 0.0)
+def next_waypoint(sim: "Simulator", r: "RobotAgent") -> Goal | None:
+    """The next waypoint of r's coverage pattern that r can drive to. A waypoint r already stands on
+    counts as reached; one inside a known obstacle, out of reach even through unmapped space, or at
+    a dead end r backed out of is skipped (and remembered as skipped)."""
+    sw, cfg = r.sweep, sim.cfg
+    tabu = [c for c, until in r.tabu.items() if until > sim.t]
+    while not sw.done:
+        c = sw.cells[sw.index]
+        x, y = c
+        if c == r.cell:
+            sw.arrive(len(r.track) - 1)
+            continue
+        why = None
+        if r.known[y, x] == OBSTACLE or r.gaveup[y, x]:
+            why = "inside an obstacle"
+        elif not np.isfinite(r.opt_dist[y, x]):
+            why = "cannot be reached"
+        elif any(max(abs(x - t[0]), abs(y - t[1])) <= 1 for t in tabu):
+            why = "a dead end I backed out of"
+        if why is None:
+            d = float(r.opt_dist[y, x]) * cfg.cell
+            if not sim.affordable(r, c, d, work_s=0.0):
+                r.unaffordable += 1                    # keep the waypoint: recharge first, then continue from here
+                return None
+            return Goal("sweep", c, 0.0, d, waypoint=sw.index, reason=f"following {sw.where()}, {d:.1f} m away")
+        sw.skipped.append((sw.index, why))
+        sw.index += 1
+    return None
+
+
+def _sweep(sim, deciding, options) -> dict[int, Goal]:
+    """Robots still on their coverage pattern: the next waypoint, or a sighting very close by."""
+    out: dict[int, Goal] = {}
+    for r in deciding:
+        if r.sweep is None or r.sweep.end_t is not None:
+            continue
+        # sightings a teammate is already going to check are left to it
+        checking = [o.goal.look_at for o in sim.teammates(r) if o.goal is not None and o.goal.kind == "verify"]
+        checking += [g.look_at for g in out.values() if g.kind == "verify"]
+        near = [g for g in options[r.id] if g.kind == "verify" and g.distance <= VERIFY_DETOUR
+                and all(np.hypot(g.look_at[0] - a[0], g.look_at[1] - a[1]) >= 1.3 for a in checking)]
+        if near:
+            g = min(near, key=lambda g: g.distance)
+            out[r.id] = _describe(g, f"a sighting within {VERIFY_DETOUR:g} m of my {r.sweep.pattern_name}: "
+                                     f"checking it, then continuing with {r.sweep.where()}")
+            continue
+        g = None if r.sweep.done else next_waypoint(sim, r)
+        if g is not None:
+            out[r.id] = g
+        elif not r.sweep.done:                         # the battery cannot pay for the next waypoint and the way back
+            g = sim._battery_blocked(r)
+            if g is not None:
+                out[r.id] = g                          # recharge, then continue the pattern where I left it
+            else:                                      # no recharging: the rest of my pattern is out of reach
+                r.sweep.end_move, r.sweep.end_t = len(r.track) - 1, sim.t
+                sim._log(f"R{r.id} stops its {r.sweep.pattern_name} at {r.sweep.where()}: {r.finished_reason}.")
+        else:
+            r.sweep.end_move, r.sweep.end_t = len(r.track) - 1, sim.t
+            sim._log(f"R{r.id} has finished its {r.sweep.pattern_name} ({r.sweep.reached} waypoints reached, "
+                     f"{len(r.sweep.skipped)} skipped): now searching what the patterns missed "
+                     f"({sim.cfg.strategy} strategy).")
+    return out
 
 
 def choose(sim: "Simulator", deciding: list["RobotAgent"]) -> dict[int, Goal | None]:
-    strategy = sim.cfg.strategy
     options = {r.id: robot_goals(sim, r, r.dist) for r in deciding}
+    out: dict[int, Goal | None] = {}
+    if sim.cfg.coverage != "frontier":
+        out.update(_sweep(sim, deciding, options))
+        deciding = [r for r in deciding if r.id not in out]
+        if not deciding:
+            return out
+    out.update(_choose_frontier(sim, deciding, options))
+    return out
+
+
+def _choose_frontier(sim: "Simulator", deciding: list["RobotAgent"], options: dict) -> dict[int, Goal | None]:
+    """Frontier-based exploration: the team strategy picks among the frontier and verify goals."""
+    strategy = sim.cfg.strategy
     out: dict[int, Goal | None] = {}
     if strategy == "random":
         for r in deciding:
@@ -144,10 +220,8 @@ def choose(sim: "Simulator", deciding: list["RobotAgent"]) -> dict[int, Goal | N
         return out
     if strategy == "greedy":
         for r in deciding:
-            g = min(options[r.id], key=lambda g: (_pattern_distance(g) + sim.tie_break(), -g.value), default=None)
-            why = "nearest goal (teammates ignored)" if g is None or g.order is None else \
-                "nearest goal in pattern order (teammates ignored)"
-            out[r.id] = _describe(g, why, sim) if g else None
+            g = min(options[r.id], key=lambda g: (g.distance + sim.tie_break(), -g.value), default=None)
+            out[r.id] = _describe(g, "nearest goal (teammates ignored)", sim) if g else None
         return out
     if strategy == "partition":
         return _partition(sim, deciding, options)
@@ -166,7 +240,7 @@ def _partition(sim, deciding, options) -> dict[int, Goal | None]:
         zone = r.region
         mine = [g for g in options[r.id] if sim.region[g.cell[1], g.cell[0]] == zone]
         if mine:
-            g = min(mine, key=lambda g: (_pattern_distance(g), -g.value))
+            g = min(mine, key=lambda g: (g.distance, -g.value))
             out[r.id] = _describe(g, f"nearest goal inside my zone Z{zone}", sim)
             continue
         # nothing reachable in my zone on my map: is there still unsearched space in it?
@@ -200,8 +274,6 @@ def _auction(sim, deciding, options) -> dict[int, Goal | None]:
                         for c, _ in claims)
             return (-np.inf, "") if taken else (g.value, "")
         v, note = g.value, ""
-        if g.order is not None:                            # coverage pattern: goals next in line are worth more
-            v += ORDER_VALUE * (1.0 - g.order)
         for c, o in claims:
             if c.kind != "frontier":
                 continue

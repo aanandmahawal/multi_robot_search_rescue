@@ -21,7 +21,7 @@ class RescueConfig:
     width: int = 56             # navigation cells (each CELL metres wide)
     height: int = 40
     cell: float = 0.5           # metres per navigation cell (the camera renders at cell / 2)
-    building: str = "office"    # office | apartments | warehouse
+    building: str = "office"    # office | apartments | hospital | school | parking | warehouse | plain (open test ground)
     damage: str = "moderate"    # light | moderate | severe  (collapse, rubble, buried victims)
     n_victims: int = 10         # how many victims are really inside
     victims_known: bool = False # do the robots know that number? (then they stop once all are found)
@@ -54,9 +54,12 @@ class RescueConfig:
     thermal_detector_path: str = "models/thermal_detector.pt"   # AI for the thermal camera (temperature + depth)
     fusion_detector_path: str = "models/fusion_detector.pt"     # AI for both cameras together
     thermal_check: bool = True      # physics, not AI: a "person" hotter than 40 °C is a heater or an engine, ignore it
-    detect_threshold: float = 0.85  # heatmap probability that counts as a detection
-    confirm_logodds: float = 6.0    # evidence needed to declare "victim found"
-    confirm_frames: int = 4         # ...seen in at least this many separate camera frames
+    # confirmation rule, chosen with scripts/reliability.py and checked on missions it was not tuned on:
+    # 0.92 / 9 / 6 frames (was 0.85 / 6 / 4) cut false alarms by more than half (fusion: precision 75 % -> 89 %)
+    # for 1-3 fewer confirmed victims per 108; those stay on the victim map as unconfirmed sightings
+    detect_threshold: float = 0.92  # heatmap probability that counts as a detection
+    confirm_logodds: float = 9.0    # evidence needed to declare "victim found"
+    confirm_frames: int = 6         # ...seen in at least this many separate camera frames
     confirm_needs_close_look: bool = True  # ...including at least one from within verify_distance
     reject_logodds: float = -1.5    # evidence below which a candidate is dropped
     verify_distance: float = 2.5    # a close look counts as strong evidence
@@ -66,11 +69,14 @@ class RescueConfig:
 
     # ---- navigation (rescue/planners.py, rescue/coverage.py, rescue/motion.py) --------
     planner: str = "dijkstra"       # route to the chosen goal: dijkstra | astar | rrtstar | aco
-    coverage: str = "frontier"      # order in which unsearched space is visited: frontier | boustrophedon | spiral
+    coverage: str = "frontier"      # how the building is searched: frontier | boustrophedon (lawnmower) | spiral
     avoidance: str = "none"         # local obstacle avoidance: none (follow the route, wait for teammates) | dwa
     speed: float = 0.5              # m/s driving speed (a diagonal cell, 0.71 m, takes longer than a straight one)
     turn_rate: float = 180.0        # deg/s turning on the spot (a differential-drive robot turns before it drives)
-    battery_wh: float = 0.0         # battery capacity in watt-hours; 0 = unlimited
+    battery_wh: float = 0.0         # battery capacity in watt-hours (every robot); 0 = unlimited
+    battery_each: tuple = ()        # per-robot capacities in Wh (robot i gets battery_each[i]; 0 = unlimited)
+    recharge: bool = True           # a robot that went home on low battery recharges at the base and goes back out
+    charge_power: float = 60.0      # W the base's charger delivers (1 Wh per minute)
     obstacle_density: float = 1.0   # multiplies the number of rubble piles (1 = as the damage level says)
     revisit_penalty: float = 0.0    # extra route cost (cells) per earlier team visit of a cell, up to 5 visits
     deadend_recovery: bool = True   # detect loops / blocked corridors, back off and avoid that goal for a while

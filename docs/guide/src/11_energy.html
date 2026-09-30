@@ -1,0 +1,69 @@
+<h1><span class="num">11</span>Energy and batteries</h1>
+<p class="lead">A robot that runs flat in the middle of a collapsed building is a second rescue problem. So every move, every turn and every second of computing costs
+energy, and with a battery fitted the robots plan with their charge in mind: they refuse tasks they cannot come back from, turn home in time, and recharge.</p>
+
+<h2>11.1 The power model</h2>
+<table>
+<tr><th>Consumer</th><th>Model</th><th>Value (defaults)</th></tr>
+<tr><td>computer</td><td>always on while working</td><td>15 W</td></tr>
+<tr><td>LiDAR / cameras</td><td>if fitted</td><td>8 W / 6 W</td></tr>
+<tr><td>rolling resistance</td><td>m · g · C<sub>rr</sub> / η per metre (25 kg, C<sub>rr</sub> = 0.05 on debris, drivetrain η = 0.6)</td><td>20.4 J/m</td></tr>
+<tr><td>motor copper losses</td><td>k · v² watts = k · v joules per metre (k = 12 W·s²/m²)</td><td>6 J/m at 0.5 m/s</td></tr>
+<tr><td>turning on the spot</td><td>m · g · μ<sub>t</sub> · (b/2) · |Δθ| / η (tracks scrub, μ<sub>t</sub> = 0.3, track width b = 0.4 m)</td><td>38.5 J per 90°</td></tr>
+</table>
+<p>Put together: a robot with both sensors, driving at 0.5 m/s, draws about <b>42 W</b>, so <b>1 Wh (3,600 J) lasts about 85 seconds</b>. Faster driving saves base energy
+(less time) but costs more in motor losses, which grow with speed².</p>
+
+<div class="box warn"><b>Limitation: why the batteries on the dashboard are so small</b>
+<p>A real 25 kg robot carries a few hundred Wh and works for hours. The simulated floor is only 28 × 20 m, and a mission takes minutes. So only batteries of 1–3 Wh run low within a
+mission, and the dashboard offers those sizes to let you watch the low-battery behaviour. The physics is the same; only the scale is shrunk.</p></div>
+
+<h2>11.2 Three battery rules</h2>
+<figure>
+<svg viewBox="0 0 760 250" width="760">
+  <g font-size="11">
+  <rect x="10" y="15" width="235" height="95" rx="7" class="d-green"/><text x="127" y="37" text-anchor="middle" class="d-tb">1 · before taking a task</text>
+  <text x="127" y="57" text-anchor="middle" class="d-ts">can I get there, work there,</text><text x="127" y="72" text-anchor="middle" class="d-ts">and still get home with margin?</text><text x="127" y="92" text-anchor="middle" class="d-ts">no → leave it to teammates</text>
+  <rect x="262" y="15" width="235" height="95" rx="7" class="d-warm"/><text x="380" y="37" text-anchor="middle" class="d-tb">2 · every second on the way</text>
+  <text x="380" y="57" text-anchor="middle" class="d-ts">left ≤ 1.3 × energy of the drive</text><text x="380" y="72" text-anchor="middle" class="d-ts">home + 5 % reserve?</text><text x="380" y="92" text-anchor="middle" class="d-ts">yes → turn home now</text>
+  <rect x="514" y="15" width="235" height="95" rx="7" class="d-violet"/><text x="632" y="37" text-anchor="middle" class="d-tb">3 · at the base</text>
+  <text x="632" y="57" text-anchor="middle" class="d-ts">Recharge: dock, charge at 60 W</text><text x="632" y="72" text-anchor="middle" class="d-ts">(1 Wh per minute), go back out</text><text x="632" y="92" text-anchor="middle" class="d-ts">Stay: remain home for good</text>
+  <rect x="10" y="140" width="739" height="95" rx="7" fill="#fff" stroke="#b9c3cf"/>
+  <text x="25" y="162" class="d-tb">Guarantees</text>
+  <text x="25" y="184" class="d-t">• A lawnmower or spiral robot resumes its pattern at the exact waypoint where it stopped.</text>
+  <text x="25" y="204" class="d-t">• If even a full battery cannot reach anything that is left, the robot says so and stays home: no endless docking.</text>
+  <text x="25" y="224" class="d-t">• With these rules no battery runs flat (the tests check it); at 0 J a robot would stop where it is.</text>
+  </g>
+</svg>
+<figcaption><b>Figure 11.1</b> The battery rules (<code>Simulator.affordable</code>, <code>_battery_low</code>, <code>_special_goal</code>, <code>_at_base</code>, <code>_battery_blocked</code>).</figcaption>
+</figure>
+
+<h3>Rule 1: energy-aware task choice</h3>
+<p>For each candidate goal at route distance d, with d<sub>home</sub> the route distance from that goal back to the base (from a distance field grown from the base on the
+robot's own map), the robot checks:</p>
+<div class="eq">1.3 · (e · d + P · (d/v + 5 s)) &nbsp;+&nbsp; 1.3 · (e · d<sub>home</sub> + P · d<sub>home</sub>/v) &nbsp;+&nbsp; 5 % of capacity &nbsp;≤&nbsp; energy left</div>
+<p>where e = 26.4 J/m is the driving energy per metre, P = 29 W the base power, v = 0.5 m/s, and 5 s the time for a scan at the goal. The 1.3 is a safety factor for detours and turns.</p>
+
+<div class="box simple"><b>Worked example</b>
+<p>A robot with a 1 Wh battery (3,600 J) has 60 % left: 2,160 J. A frontier is 6 m away, and from there the base is 12 m away.</p>
+<ul>
+<li>Going there and scanning: 1.3 × (26.4 × 6 + 29 × (12 s + 5 s)) = <b>847 J</b></li>
+<li>Coming back: 1.3 × (26.4 × 12 + 29 × 24 s) = <b>1,317 J</b></li>
+<li>Reserve: 5 % × 3,600 = <b>180 J</b>. Total needed: <b>2,344 J &gt; 2,160 J</b>.</li>
+</ul>
+<p>So the robot does not take this frontier. If a nearer task fits, it takes that one. If none fits, it goes home to recharge: "7 task(s) left, but with 60 % battery I could not get there
+and back: going to recharge".</p></div>
+
+<figure><img src="img/battery.png">
+<figcaption><b>Figure 11.2</b> Four robots with different batteries sweep the test ground with the lawnmower. R0 (1.5 Wh) turns home at about 10 %, recharges (dotted rising line, 60 W) and goes back
+to its lanes. R1 (2 Wh) and R2 (3 Wh) do the same later. R3 has no battery limit. Nobody runs flat, and the whole ground is searched.</figcaption></figure>
+
+<h2>11.3 Per-robot batteries</h2>
+<p>Choosing <i>Battery = Different per robot</i> gives every robot its own capacity (1–10 Wh or unlimited). This models a mixed fleet, and it shows the energy-aware task choice at work:
+robots with more charge take the far tasks, and robots with less charge take near tasks or recharge. Each robot's name tag in the 3-D view shows its charge ("R1 · 62%", amber below 45 %,
+red below 20 %, ⚡ while charging), and the Robots tab lists capacity, charge, trips to the charger and time spent charging.</p>
+
+<div class="box tip"><b>Interview tip: "how does battery affect task allocation?"</b>
+<p>"Each robot filters its candidate tasks by feasibility: energy to get there and do the work, plus energy to get back home, both with a 1.3 safety factor, plus a 5 % reserve,
+must fit in what is left. So in the auction a low-battery robot simply does not bid on far tasks, and a better-charged teammate wins them. The energy model is physical (rolling resistance,
+motor losses, turning, base power), and the distances come from route distance fields, not straight lines."</p></div>

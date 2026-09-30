@@ -1,0 +1,88 @@
+<h1><span class="num">10</span>Moving and reacting</h1>
+<p class="lead">A route is a plan; the world does not always agree with it. A laser may have missed a low obstacle, a teammate may stand on the next cell, a corridor
+may turn out to be a dead end. This chapter explains how the robots cope, one situation at a time.</p>
+
+<h2>10.1 Driving a route</h2>
+<p>Each second a robot receives one second of time credit and follows its route cell by cell. A move costs |Δθ|/180°/s + distance/0.5 m/s (chapter 2), so a robot drives
+about one straight cell per second. Moves are made in up to 8 small rounds per second, so a fast robot can take several cells per second, and in each round every moving
+robot states the cell it wants next. Two rules resolve conflicts:</p>
+<ul>
+<li><b>No two robots in one cell, and no swapping</b> (two robots passing through each other). If a robot's target is taken or occupied by a robot that is not moving away,
+it waits this round. Because a waiting robot also blocks whoever wanted <i>its</i> cell, the check is repeated until nothing changes.</li>
+<li>A robot on its way to check a sighting goes first.</li>
+</ul>
+<p>After waiting 3 seconds, a robot drops its route and plans a new one that treats its teammates' cells as blocked: it goes around them.</p>
+
+<h2>10.2 Dynamic Window Approach (optional)</h2>
+<p>With <i>Obstacles = DWA</i>, the route says <i>where to go</i>, but the very next move is chosen locally by the <b>Dynamic Window Approach</b> (Fox, Burgard & Thrun, 1997).
+The "dynamic window" is the set of moves the robot can make right now: its 8 neighbouring cells that are free on its map, not occupied by a teammate and not a corner cut.
+Each is scored:</p>
+<div class="eq">G = 0.45 · heading + 0.25 · clearance + 0.30 · progress − 0.10 · turn</div>
+<table>
+<tr><th>Term</th><th>Meaning</th><th>Range</th></tr>
+<tr><td>heading</td><td>how well the move points at the route two cells ahead: 1 − |angle error|/π</td><td>0–1</td></tr>
+<tr><td>clearance</td><td>distance from the new cell to the nearest obstacle or teammate, up to 3 cells (from a Euclidean distance transform)</td><td>0–1</td></tr>
+<tr><td>progress</td><td>how much the move shortens the remaining way to the point 4 cells ahead on the route</td><td>0–1</td></tr>
+<tr><td>turn</td><td>how sharply the robot must turn (smoothness)</td><td>0–1</td></tr>
+</table>
+<p>The best move wins. If a teammate stands on the route and every alternative leads backwards, the robot waits instead. Afterwards it rejoins its route from wherever it is,
+or plans a new one. The effect: robots keep clear of walls and steer around each other instead of queueing. In the measurements, waits for a teammate fell from 14.5 to 3.0 per
+mission, for about 7 % more mission time.</p>
+
+<h2>10.3 What happens when…</h2>
+<figure>
+<svg viewBox="0 0 760 420" width="760">
+  <g font-size="11">
+  <rect x="10" y="10" width="230" height="58" rx="6" class="d-violet"/><text x="125" y="31" text-anchor="middle" class="d-tb">sensors show a new obstacle</text><text x="125" y="48" text-anchor="middle" class="d-ts">on the next 20 cells of my route</text><text x="125" y="61" text-anchor="middle" class="d-ts">(LiDAR / camera, before I reach it)</text>
+  <rect x="290" y="10" width="460" height="58" rx="6" class="d-green"/><text x="300" y="32" class="d-t">→ replan at once with the chosen planner ("R2 sees an obstacle on its route: replanning")</text><text x="300" y="52" class="d-ts">counted as a replan; the goal stays the same</text>
+  <rect x="10" y="80" width="230" height="58" rx="6" class="d-red"/><text x="125" y="101" text-anchor="middle" class="d-tb">the bumper hits something</text><text x="125" y="118" text-anchor="middle" class="d-ts">the map said free, the world says no</text><text x="125" y="131" text-anchor="middle" class="d-ts">(a low object nobody saw)</text>
+  <rect x="290" y="80" width="460" height="58" rx="6" class="d-green"/><text x="300" y="102" class="d-t">→ mark the cell as a proven obstacle (+4, final), stop, drop the route, decide again</text><text x="300" y="122" class="d-ts">the turn and the touch still cost time and energy; counted as a bump</text>
+  <rect x="10" y="150" width="230" height="58" rx="6" class="d-grey"/><text x="125" y="171" text-anchor="middle" class="d-tb">a teammate is in the way</text><text x="125" y="188" text-anchor="middle" class="d-ts">it wants my cell, or sits on</text><text x="125" y="201" text-anchor="middle" class="d-ts">the next one</text>
+  <rect x="290" y="150" width="460" height="58" rx="6" class="d-green"/><text x="300" y="172" class="d-t">→ follow-route: wait; after 3 s plan around the teammates' cells</text><text x="300" y="192" class="d-t">→ DWA: step around it now, or wait if every way round leads back</text>
+  <rect x="10" y="220" width="230" height="58" rx="6" class="d-warm"/><text x="125" y="241" text-anchor="middle" class="d-tb">at a frontier, but the unknown</text><text x="125" y="258" text-anchor="middle" class="d-ts">cell beside me stays unknown</text><text x="125" y="271" text-anchor="middle" class="d-ts">(table top, door frame, corner)</text>
+  <rect x="290" y="220" width="460" height="58" rx="6" class="d-green"/><text x="300" y="242" class="d-t">→ PROBE: drive slowly into it; I get in (free) or the bumper stops me (obstacle)</text><text x="300" y="262" class="d-ts">still unresolved after one probe → "given up" (shared with the team), so the search always ends</text>
+  <rect x="10" y="290" width="230" height="58" rx="6" class="d-red"/><text x="125" y="311" text-anchor="middle" class="d-tb">going back and forth / stuck</text><text x="125" y="328" text-anchor="middle" class="d-ts">≤ 4 different cells in 24 s,</text><text x="125" y="341" text-anchor="middle" class="d-ts">or blocked for 8 s</text>
+  <rect x="290" y="290" width="460" height="58" rx="6" class="d-green"/><text x="300" y="312" class="d-t">→ DEAD END: back off along my own trail at least 4 cells, and put that goal on a</text><text x="300" y="332" class="d-t">60 s "tabu" list so I choose something else (Dead ends = Recover)</text>
+  <rect x="10" y="360" width="230" height="58" rx="6" class="d-violet"/><text x="125" y="381" text-anchor="middle" class="d-tb">unsearched space is left, but</text><text x="125" y="398" text-anchor="middle" class="d-ts">sealed off by cells only the</text><text x="125" y="411" text-anchor="middle" class="d-ts">laser calls obstacles</text>
+  <rect x="290" y="360" width="460" height="58" rx="6" class="d-green"/><text x="300" y="382" class="d-t">→ BREAKTHROUGH: take the cheapest way through such cells (each costs 5–10 m extra,</text><text x="300" y="402" class="d-t">more if the laser is surer); the bumper settles each one; give up after 4 real obstacles</text>
+  <path d="M240 39H288M240 109H288M240 179H288M240 249H288M240 319H288M240 389H288" class="d-arrow"/>
+  </g>
+</svg>
+<figcaption><b>Figure 10.1</b> Six situations and the reaction the code takes (<code>Simulator._decide</code>, <code>_move</code>, <code>_probe</code>, <code>_recover</code>, <code>_breakthrough</code>).</figcaption>
+</figure>
+
+<h2>10.4 Obstacles in more detail</h2>
+<p>There are three layers of defence against obstacles, from most to least preferable:</p>
+<ol>
+<li><b>Plan around what is on the map.</b> Routes only use FREE cells, and diagonal moves never cut corners.</li>
+<li><b>Replan before reaching a new obstacle.</b> Every second, a robot checks the next 20 cells of its route against its (just updated) map. The LiDAR sees 8 m ahead, so most
+obstacles appear on the map long before the robot gets there.</li>
+<li><b>The bumper as the last resort.</b> Things lower than the laser's 40 cm plane and outside the camera's view (a fallen jacket beside the robot) can be missed by both sensors.
+Driving into one costs a turn and a touch, then the cell is known for good.</li>
+</ol>
+<p>A special case is a waypoint of a lawnmower or spiral. Waypoints are planned through unmapped space (free-space assumption). A waypoint that turns out to lie inside an
+obstacle is skipped, and one that becomes unreachable, even through unknown cells, is skipped too. The robot carries on with the next one.</p>
+
+<h2>10.5 Dead ends and loops</h2>
+<p>Why would a robot loop? Its map changes every second. A goal that looked reachable through a doorway may turn out to be blocked, and replanning can then flip between two
+routes. The robot therefore remembers its last 24 positions. If, while driving somewhere, it visited <b>at most 4 different cells</b> in that time, or it has been <b>blocked for
+8 seconds</b>, it declares a dead end. It then backs off along its own trail to a cell at least 4 cells away (reachable, avoiding teammates), and marks the goal it was heading
+for as <b>tabu for 60 seconds</b>, so the next decision picks something else. With <i>Dead ends = Off</i> none of this happens, and a robot can stay stuck in a loop. The option
+exists to show why recovery is needed.</p>
+
+<h2>10.6 Revisits</h2>
+<p>Driving over ground the team has already crossed is not forbidden (it is often the only way out of a room), but with <i>Revisits = Avoid</i> it is <b>discouraged</b>: each cell costs
+an extra <b>0.3 cells per earlier team visit</b>, up to 5 visits, in every planner.</p>
+<div class="eq">cost(route) = Σ step cost + 0.3 · Σ min(visits(cell), 5)</div>
+<p>Routes then prefer fresh ground, where the cameras see new things on the way, and robots meet less in busy corridors. Measured: moves over already-driven ground fell from 42 % to
+33 %, and waits for teammates from 14.5 to 6.3 per mission, with routes only slightly longer. The <i>Repeat visits</i> layer on the dashboard paints cells redder the more often they
+were driven through.</p>
+
+<div class="box tip"><b>Interview tip: "can your robot get stuck?"</b>
+<p>"Yes, and the system is built around that fact. Robots replan when the map changes, the bumper catches what the sensors missed, a probe resolves cells the sensors cannot,
+a loop/stuck detector triggers a back-off with a tabu list, and cells still unresolved after a probe are given up so the search always terminates. With recovery switched off you can
+watch a robot oscillate, which shows why each layer exists."</p></div>
+
+<div class="box warn"><b>Limitation: grid motion</b>
+<p>Robots move between cell centres with turn-then-drive timing. There are no wheel dynamics, acceleration limits, slip or continuous velocity commands, and a robot occupies one cell
+(a point robot on a 0.5 m grid) rather than a body with a real footprint. A real robot would add a velocity controller (e.g. pure pursuit) and inflate obstacles by its radius.</p></div>

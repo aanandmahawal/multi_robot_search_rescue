@@ -10,7 +10,7 @@ const BOX = new THREE.BoxGeometry(1, 1, 1); BOX.translate(0, 0.5, 0);
 const CYL = new THREE.CylinderGeometry(1, 1, 1, 16); CYL.translate(0, 0.5, 0);
 const ROCK = new THREE.DodecahedronGeometry(1, 0);
 const TEX = { wall: concrete("#bdb7ab"), pillar: concrete("#8f9094") };
-const WALL_TINT = { office: 0xe6e9ee, apartments: 0xf5ead8, hospital: 0xe9f4ef, school: 0xf7ecd2, parking: 0xb9bcc0, warehouse: 0xffffff };
+const WALL_TINT = { office: 0xe6e9ee, apartments: 0xf5ead8, hospital: 0xe9f4ef, school: 0xf7ecd2, parking: 0xb9bcc0, warehouse: 0xffffff, plain: 0xe8e8e4 };
 
 export function createBuilder(world, group) {
   const shaded = [];                                   // { mesh, colors, nav, map } per instanced mesh

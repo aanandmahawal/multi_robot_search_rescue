@@ -2,3 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# project guide: build artefacts (the PDF itself is kept)
+docs/guide/guide.html
+docs/guide/.browser-profile/

@@ -1,0 +1,92 @@
+<h2>8.4 Coverage patterns: where next?</h2>
+<p>A <b>coverage pattern</b> is the robot's plan for sweeping space. The project offers the three classic ones.</p>
+
+<h3>Frontier-based exploration (default)</h3>
+<p>No fixed path. The robot drives to a frontier (the edge of the searched area), makes a 360° camera scan on arrival (four 90° turns), and picks the next frontier.
+<i>Which</i> frontier is decided by the team strategy (8.5). Frontier exploration adapts to any layout, which is why it suits a building full of walls and doors.</p>
+
+<h3>Lawnmower (boustrophedon)</h3>
+<p>The word means "the way an ox turns when ploughing": straight lanes, alternating direction. The building's rectangle (its outline is known to rescuers; its inside
+is not) is split into one equal rectangle per robot. For n robots the grid is r × c with r·c = n, choosing the factorisation whose rectangles are the most square. Then
+each robot is matched to a rectangle so that the <i>total</i> drive to all pattern starts is smallest. That matching is the assignment problem, solved exactly with
+the <b>Hungarian method</b> (<code>scipy.optimize.linear_sum_assignment</code>).</p>
+<p><b>Lane spacing.</b> A forward camera with range R and field of view F sees a cell at sideways offset e once the robot is at forward distance f ≥ e (inside the cone)
+and √(f² + e²) ≤ R. So the band swept while driving has half-width R·sin(F/2). With 25 % overlap between neighbouring lanes:</p>
+<div class="eq">w = 2 · R · sin(F/2) · (1 − 0.25) = 2 · 5 m · sin 45° · 0.75 ≈ 5.3 m</div>
+<p>Lanes run <b>parallel to the rectangle's longer side</b>. That gives the fewest lanes and so the fewest turns, which are the costly part of a sweep (Huang, 2001).
+With D the width across the lanes:</p>
+<div class="eq">K = ceil(D / w) lanes, &nbsp; lane k at a<sub>0</sub> + (k + ½) · D / K, &nbsp; k = 0 … K − 1</div>
+<p>So neighbouring lanes are D/K ≤ w apart and the outer lanes lie at most w/2 from the edge: nothing is left between lanes. Even lanes run one way, odd lanes the
+other, and lane ends stay 1 m from the region's edge.</p>
+
+<h3>Spiral (outside in)</h3>
+<p>From a corner, the robot drives the top edge, then the right edge, the bottom edge and the left edge. Each edge moves inwards by one spacing once it has been
+driven, until two opposite edges cross (the "spiral matrix" order). The passes lie on the same lines as the lawnmower's, so the same spacing guarantee holds.</p>
+
+<h3>From pattern to waypoints to routes</h3>
+<p>Both patterns start in the region corner nearest to the robot (the pattern is mirrored to put it there). The path is cut into <b>waypoints at most 1.5 m apart</b>.
+Each waypoint is a <i>sweep goal</i> that the route planner connects to the previous one. So the robot follows the pattern closely, and when an obstacle sits on a
+lane, the planner routes around it and returns to the lane. A waypoint found <b>inside an obstacle</b>, or <b>unreachable</b> even through unmapped space, is
+skipped (a red × on the dashboard). Sweep waypoints get no 360° scan, because the lane spacing already guarantees coverage. When a robot's pattern is done, it
+searches whatever the patterns missed (the shadows behind obstacles) by frontier exploration, so every mode ends only when nothing reachable is left unsearched.</p>
+
+<figure><img src="img/patterns.png">
+<figcaption><b>Figure 8.3</b> Planned patterns on the open test ground. One robot: 4 horizontal lanes, or 2 spiral rings. Four robots: the hall splits into a 2 × 2 grid and each
+robot sweeps its own quarter (2 lanes each). Dots mark where each pattern starts; arrows show the first direction.</figcaption></figure>
+
+<figure><img src="../../results/algorithms/coverage.png">
+<figcaption><b>Figure 8.4</b> What really happened (output of <code>scripts/check_algorithms.py</code>, 1 robot): dashed = planned pattern, solid = the track driven. The lawnmower robot reached 75 of 77 waypoints
+(2 lay on a victim) and stayed within 0.21 m of its lanes on average (a cell is 0.5 m). The short spurs are trips to check a nearby sighting; the long diagonals at the end
+are the frontier mop-up and the drive home.</figcaption></figure>
+
+<h2>8.5 Team strategies: who goes where?</h2>
+<table>
+<tr><th>Strategy</th><th>How a goal is chosen</th><th>Strength</th><th>Weakness</th></tr>
+<tr><td><b>random</b></td><td>any reachable goal at random</td><td>a baseline to compare against</td><td>wanders, overlaps</td></tr>
+<tr><td><b>greedy</b></td><td>each robot takes its nearest goal, ignoring teammates (Yamauchi 1998)</td><td>simple, no communication needed</td><td>robots bunch up on the same frontier</td></tr>
+<tr><td><b>partition</b></td><td>the building is split into one zone per robot; a robot only works in its own zone, heading there through unexplored space</td><td>no overlap at all</td><td>a robot in a small zone idles while a big zone is unfinished</td></tr>
+<tr><td><b>coordinated</b></td><td>sequential auction on utility = value − 0.5 × distance, with value cut near teammates' goals (Burgard et al. 2005)</td><td>spreads the team out, one robot per sighting</td><td>needs communication</td></tr>
+</table>
+
+<h3>The auction, step by step</h3>
+<p>All robots that need a goal take part. Every goal has a <b>value</b> (frontier: its number of cells; sighting: 30 × the current belief that it is a person) and a
+<b>distance</b> for each robot. Then:</p>
+<pre>utility(robot, goal) = value − 0.5 × distance_m          (1 m of driving costs half a point)
+repeat until every robot has a goal:
+    pick the (robot, goal) pair with the highest utility → that robot wins that goal
+    for every other goal g, as seen by the remaining robots:
+        if g is within 2 m of a won goal:  g is taken (never two robots to one spot)
+        if g is within 4 m of a won goal:  value(g) × (distance to it / 4 m)   (a teammate will see most of it)
+        a sighting already won by someone: taken (one robot checks each sighting)</pre>
+<p>Robots whose teammates hold goals from earlier decisions see those goals as already won, so a robot deciding alone still avoids its teammates' targets.</p>
+
+<div class="box simple"><b>Worked example: why the auction beats greedy</b>
+<table style="margin-bottom:2mm">
+<tr><th>goal</th><th>value (cells)</th><th>R0 distance</th><th>R1 distance</th><th>R0 utility</th><th>R1 utility</th></tr>
+<tr><td>F1 (small room nearby)</td><td>12</td><td>4 m</td><td>3 m</td><td>12 − 2 = 10</td><td>12 − 1.5 = 10.5</td></tr>
+<tr><td>F2 (big hall)</td><td>20</td><td>16 m</td><td>6 m</td><td>20 − 8 = 12</td><td>20 − 3 = <b>17</b></td></tr>
+<tr><td>F3 (corner, 2.5 m from F1)</td><td>8</td><td>5 m</td><td>7 m</td><td>8 − 2.5 = 5.5</td><td>8 − 3.5 = 4.5</td></tr>
+</table>
+<p><b>Greedy:</b> R0's nearest goal is F1 (4 m), and R1's nearest is also F1 (3 m). Both drive to the same small room and the big hall waits.<br>
+<b>Auction:</b> the best pair overall is R1 → F2 (17). F2 is now taken for R0, whose best remaining goal is F1 (10). The team splits up and both areas are
+searched at once. A third robot would then see F3's value cut from 8 to 8 × 2.5/4 = 5, because R0 at F1 will already see most of that corner.</p></div>
+
+<figure><img src="img/strategies.png">
+<figcaption><b>Figure 8.5</b> The same office searched with each strategy (4 robots, perfect eyes, so only teamwork differs). Partition (done at 290 s) and the coordinated auction
+(299 s) spread the team out and finish first. Greedy robots bunch up on the same frontiers and need 383 s. Random wanders and has searched only 61 % when the 900 s limit ends the mission.
+One building is only an example. Over 24 buildings (chapter 14), partition is also fastest on average and drives least, with the auction close behind; greedy and random trail.</figcaption></figure>
+
+<h2>8.6 How the three layers combine</h2>
+<p>Any pattern works with any strategy and any planner, because each answers a different question:</p>
+<table>
+<tr><th>You choose</th><th>What it changes</th><th>What it does <i>not</i> change</th></tr>
+<tr><td>Coverage = frontier</td><td>goals come from the frontier; the strategy chooses among them all mission long</td><td>how routes are planned</td></tr>
+<tr><td>Coverage = lawnmower / spiral</td><td>each robot follows its own pattern first; the strategy is used only for the mop-up afterwards (partition then uses the pattern rectangles as zones)</td><td>how routes are planned</td></tr>
+<tr><td>Strategy</td><td>which robot takes which frontier or sighting</td><td>the route to it</td></tr>
+<tr><td>Path planner</td><td>the cell-by-cell route from waypoint to waypoint or to a frontier</td><td>which goal is chosen (always from one Dijkstra distance field)</td></tr>
+</table>
+
+<div class="box tip"><b>Interview tip: "how do coverage, strategy and planning interact with a spiral?"</b>
+<p>"The spiral decides <i>where</i>: a list of waypoints 1.5 m apart along shrinking rectangular rings in the robot's own region. Before each waypoint the robot checks for emergencies
+and for sightings within 6 m. The route planner, whichever one is selected, connects consecutive waypoints on the robot's map, assuming unmapped cells are free and replanning when an obstacle
+appears. After the spiral, the team strategy takes over for the mop-up. The three layers are independent, so I can swap any one of them and compare fairly."</p></div>

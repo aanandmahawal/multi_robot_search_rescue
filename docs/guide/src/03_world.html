@@ -1,0 +1,105 @@
+<h1><span class="num">3</span>The world: generating buildings</h1>
+<p class="lead">Every mission needs a building nobody has seen before, so that the robots truly explore. <code>rescue/world.py</code> builds one
+procedurally from a seed in about a tenth of a second: a floor plan, damage, furniture, rubble, victims and look-alikes, and then
+<code>rescue/thermal.py</code> gives every surface a temperature.</p>
+
+<h2>3.1 The pipeline</h2>
+<figure>
+<svg viewBox="0 0 760 170" width="760">
+  <g font-size="11">
+  <rect x="5" y="20" width="95" height="60" rx="6" class="d-grey"/><text x="52" y="44" text-anchor="middle" class="d-tb">seed</text><text x="52" y="62" text-anchor="middle" class="d-ts">+ building type</text>
+  <rect x="115" y="20" width="100" height="60" rx="6" class="d-box"/><text x="165" y="44" text-anchor="middle" class="d-tb">shell</text><text x="165" y="62" text-anchor="middle" class="d-ts">outer wall, entrance</text>
+  <rect x="230" y="20" width="100" height="60" rx="6" class="d-box"/><text x="280" y="44" text-anchor="middle" class="d-tb">layout</text><text x="280" y="62" text-anchor="middle" class="d-ts">rooms, doors, items</text>
+  <rect x="345" y="20" width="100" height="60" rx="6" class="d-red"/><text x="395" y="44" text-anchor="middle" class="d-tb">collapse</text><text x="395" y="62" text-anchor="middle" class="d-ts">walls fall → rubble</text>
+  <rect x="460" y="20" width="100" height="60" rx="6" class="d-green"/><text x="510" y="44" text-anchor="middle" class="d-tb">furniture</text><text x="510" y="62" text-anchor="middle" class="d-ts">only if no room is cut off</text>
+  <rect x="575" y="20" width="85" height="60" rx="6" class="d-red"/><text x="617" y="44" text-anchor="middle" class="d-tb">rubble</text><text x="617" y="62" text-anchor="middle" class="d-ts">random walks</text>
+  <rect x="675" y="20" width="80" height="60" rx="6" class="d-warm"/><text x="715" y="44" text-anchor="middle" class="d-tb">people</text><text x="715" y="62" text-anchor="middle" class="d-ts">+ decoys</text>
+  <path d="M100 50H113M215 50H228M330 50H343M445 50H458M560 50H573M660 50H673" class="d-arrow"/>
+  <rect x="230" y="105" width="210" height="50" rx="6" class="d-grey"/><text x="335" y="126" text-anchor="middle" class="d-tb">fine heightfield</text><text x="335" y="143" text-anchor="middle" class="d-ts">height · colour · object id per 25 cm</text>
+  <rect x="470" y="105" width="185" height="50" rx="6" class="d-warm"/><text x="562" y="126" text-anchor="middle" class="d-tb">thermal layer</text><text x="562" y="143" text-anchor="middle" class="d-ts">°C of every surface</text>
+  <path d="M715 80 L715 130 L657 130" class="d-arrow"/><path d="M470 130 L442 130" class="d-arrow"/>
+  <text x="120" y="135" text-anchor="middle" class="d-ts">then: which cells are</text><text x="120" y="150" text-anchor="middle" class="d-ts">reachable from the door</text>
+  <path d="M228 130 L185 130" class="d-arrow"/>
+  </g>
+</svg>
+<figcaption><b>Figure 3.1</b> How <code>world.generate(cfg)</code> builds a building. Every random choice comes from one generator started from <code>cfg.seed</code>.</figcaption>
+</figure>
+
+<h3>Step 1: the shell</h3>
+<p>The grid's left three columns (x = 0–2) are the <b>staging area</b> outside the building, where the robots and the base wait. An outer wall runs
+around the rest (x = 3 to 55, y = 0 to 39) and a <b>4-cell (2 m) wide entrance</b> is cut into the left wall at mid-height. The rescuers know this
+outline (the size of the building), but nothing about its inside, which is exactly what the robots are allowed to know too.</p>
+
+<h3>Step 2: the layout of each building type</h3>
+<p>Each type has its own layout function (<code>_layout_office</code>, <code>_layout_hospital</code>, …). It draws interior walls with doors
+(<code>hwall</code>/<code>vwall</code> with 2-cell gaps at random positions), paints floor types (room, corridor, special area) and <i>requests</i>
+furniture. Rooms along a corridor are made by <code>_rooms_along</code>, which cuts a strip into rooms 8–11 cells wide with one door each onto
+the corridor.</p>
+
+<figure><img src="img/buildings.png">
+<figcaption><b>Figure 3.2</b> One example of each building type (seed 2), as the robots would have to discover it. The legend shows what each colour means.
+The open test ground has no damage and no look-alikes: it is made for watching the algorithms.</figcaption></figure>
+
+<table>
+<tr><th>Type</th><th>Layout</th><th>Furniture that blocks the way</th><th>Ambient</th></tr>
+<tr><td>Office</td><td>rooms along top and bottom walls, open-plan middle, a lift core</td><td>desk clusters, meeting tables, cabinets</td><td>20 °C</td></tr>
+<tr><td>Apartments</td><td>central corridor, flats both sides, each with living room and bedroom</td><td>sofa, dining table, kitchen counter, bed, wardrobe</td><td>21 °C</td></tr>
+<tr><td>Hospital</td><td>two corridors crossing, wards, reception near the door</td><td>hospital beds, bedside cabinets, counter</td><td>22 °C</td></tr>
+<tr><td>School</td><td>classrooms along a corridor, a gym with bleachers</td><td>rows of school desks, teacher's table, shelves</td><td>19 °C</td></tr>
+<tr><td>Parking</td><td>two rows of bays, a driving lane, pillars, a stairwell</td><td>cars (some with a warm engine)</td><td>13 °C</td></tr>
+<tr><td>Warehouse</td><td>offices along the top, a hall of pillars and storage racks</td><td>desks, shelves, pallet racks</td><td>15 °C</td></tr>
+<tr><td>Open test ground</td><td>one hall, fixed obstacles in the middle, corners and along walls</td><td>cabinets, shelves, counters</td><td>20 °C</td></tr>
+</table>
+
+<h3>Step 3: damage and collapse</h3>
+<p>The damage level (light / moderate / severe) sets three numbers: the share of interior walls that collapse (10 / 25 / 45 %), the rubble density
+(3 / 6 / 10 %) and the share of victims partly buried (20 / 40 / 60 %). Collapse picks random interior wall cells as starting points
+(<i>share × wall cells / 6</i> of them) and removes a run of 2–4 wall cells along the wall from each. Each removed cell becomes rubble 0.4–1.2 m high
+with probability 35 %. So a collapsed wall can open a new shortcut, or it can fill a doorway with rubble.</p>
+
+<h3>Step 4: furniture that never seals off a room</h3>
+<p>This is the most important safety check in the generator. A randomly placed wardrobe could block the only door of a room, and then nobody
+could ever search that room. So every furniture request is tested before it is accepted:</p>
+<pre>reach  = flood_fill(blocked, from = entrance)        # cells reachable before
+trial  = blocked + the furniture's cells
+after  = flood_fill(trial, from = entrance)
+accept only if  |after| == |reach| − (number of furniture cells)
+# i.e. the furniture removed exactly its own cells from the reachable area, nothing more</pre>
+<p><b>Flood fill</b> is a breadth-first search (BFS) that starts at the entrance and spreads to every free 4-neighbour. If adding the furniture made
+<i>more</i> cells unreachable than the furniture itself covers, it cut something off, and the request is dropped. The same test protects every
+victim, look-alike and warm object placed later (<code>_try_place</code>).</p>
+
+<figure><img src="img/layers.png">
+<figcaption><b>Figure 3.3</b> The layers of one generated office (seed 3). Collapse has opened some walls. Furniture fills the rooms but never blocks the
+last way in. Rubble piles grow as random walks. Finally victims (red), look-alikes (yellow) and warm objects (orange) are placed.</figcaption></figure>
+
+<h3>Step 5: rubble piles</h3>
+<p>Piles are grown as short <b>random walks</b>: from a random free cell, 2–6 steps in random directions, each visited cell getting rubble 0.3–1.4 m high.
+The number of piles is <i>density × rubble slider × free cells / 4</i>. Rubble is never placed on walls or furniture, and never within 4 cells of the entrance
+(the robots must be able to get in).</p>
+
+<h3>Step 6: people, look-alikes and the fine heightfield</h3>
+<p>A <b>victim</b> is a body 7 × 2 fine cells (1.75 m × 0.5 m) lying horizontally or vertically. It has a head, a torso in a shirt colour and legs in a trouser
+colour, and heights of about 0.2, 0.28 and 0.18 m. Victims are kept at least 2 m apart, and each placement must pass the same "cuts nothing off" test.
+Depending on the damage level, part of a body is covered by rubble 0.35–0.6 m thick (2–4 of its 7 segments). The thermal step later
+may bury some bodies completely (chapter 5).</p>
+<p><b>Look-alikes</b> (called decoys in the code) are things that can fool a colour camera: a jacket (flat, shirt-coloured), a bag, a cardboard box,
+a wooden beam and an orange barrel. Finally light floor debris (4 % of fine cells, 3–8 cm high) is scattered for visual clutter. Robots drive
+over it.</p>
+
+<div class="box code"><b>Where in the code</b>
+<p><code>world.generate</code> runs the pipeline; <code>LAYOUTS</code> maps each building name to its layout function; <code>_flood</code> is the
+flood fill; <code>_try_place</code> places bodies and objects without cutting anything off; <code>_place_people_and_decoys</code> builds bodies segment
+by segment. The world object (<code>World</code>) holds <code>blocked</code>, <code>height</code>, <code>color</code>, <code>obj</code>, <code>temp</code>,
+<code>cover</code>, the victims and the decoys.</p></div>
+
+<h2>3.2 The open test ground</h2>
+<p>The test ground (building <i>plain</i>) is deliberately <b>not random</b>. It is one empty hall with a 2 × 2 m block in the centre, two crates on the diagonal,
+1.5 m cabinets in all four corners, shelves along the top and bottom walls and counters on the side walls, plus a faint painted 2 m grid. It has no collapse,
+rubble, look-alikes or warm objects. Only the victims change with the seed. That makes it the right place to check that a lawnmower really drives
+straight lanes, or that A* really finds the same route length as Dijkstra.</p>
+
+<div class="box tip"><b>Interview tip: "how do you guarantee every area can be searched?"</b>
+<p>"Every object is placed tentatively and accepted only if a flood fill from the entrance shows that the reachable area shrank by exactly the object's own
+cells. So no placement can seal off a room, and the metric 'share of reachable floor searched' always has a well-defined 100 %." Mention the seed too: the
+same seed reproduces the same building, which is what makes experiments fair.</p></div>

@@ -58,6 +58,8 @@ def summarize(sim: "Simulator") -> dict:
         "false_alarms": len(conf) - true_pos,
         "false_alarms_warm": kinds.count("warm"),            # heaters, pets, hot water, engines
         "false_alarms_lookalike": kinds.count("lookalike"),  # jackets, bags, boxes...
+        "false_alarms_duplicate": kinds.count("victim"),     # a person already counted, reported a second time
+        "false_alarms_nothing": kinds.count("nothing"),      # nothing there at all
         "too_hot_dropped": sum(r.too_hot for r in sim.robots),
         "flagged_unconfirmed": flagged,
         "localization_error_m": float(np.mean(errors)) if errors else None,
@@ -85,9 +87,11 @@ def summarize(sim: "Simulator") -> dict:
         "avoidance": cfg.avoidance,
         "speed": cfg.speed,
         "battery_wh": cfg.battery_wh,
-        "energy_wh": sum(r.energy_j for r in sim.robots) / 3600.0,
-        "energy_wh_per_robot": [round(r.energy_j / 3600.0, 2) for r in sim.robots],
+        "energy_wh": sum(r.energy_used for r in sim.robots) / 3600.0,
+        "energy_wh_per_robot": [round(r.energy_used / 3600.0, 2) for r in sim.robots],
         "batteries_emptied": sum(r.depleted for r in sim.robots),
+        "recharges": sum(r.charges for r in sim.robots),                # trips home to the charger
+        "charging_s": sum(r.charge_s for r in sim.robots),
         "collisions": sum(r.bumps for r in sim.robots),                 # bumper contacts with obstacles
         "robot_conflicts": sum(r.conflicts for r in sim.robots),        # waits because a teammate was in the way
         "moves": sum(r.moves for r in sim.robots),
