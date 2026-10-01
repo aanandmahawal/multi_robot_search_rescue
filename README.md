@@ -9,13 +9,14 @@ them, and report a map of victims to the rescue team. Every mission is scored ag
 
 ![RescueSim dashboard](docs/guide/img/dashboard_now.png)
 
-📘 **Full explanation:** [docs/RescueSim_Guide.pdf](docs/RescueSim_Guide.pdf) is a 63-page guide to every algorithm,
+📘 **Full explanation:** [docs/RescueSim_Guide.pdf](docs/RescueSim_Guide.pdf) is a 66-page guide to every algorithm,
 sensor model and design decision, with diagrams and interview questions.
 
 ## Features
 
 - **Procedural buildings**: office, apartments, hospital, school, parking garage and warehouse, with collapse, furniture,
-  rubble, victims and look-alikes. An **open test ground** is included for checking the algorithms.
+  rubble, victims and look-alikes. An **open test ground** lets you place your own obstacles (tall blocks, walls, low crates under
+  the LiDAR) to watch the algorithms react.
 - **Simulated sensors**: a ray-cast LiDAR, an RGB-D camera and a thermal camera, with noise, blur, drift and dropouts.
   Heat does not pass through thick rubble.
 - **Mapping**: a log-odds occupancy grid per robot, merged by radio. A separate "searched" layer drives exploration.
@@ -26,9 +27,10 @@ sensor model and design decision, with diagrams and interview questions.
   - team strategy: random, greedy, partition or auction;
   - route planner: Dijkstra, A*, RRT* or ant colony.
 - **Robust motion**: replanning, bumper, probing, Dynamic Window Approach, dead-end recovery and a revisit penalty.
-- **Batteries**: a physical energy model, per-robot capacities, energy-aware task choice, and recharge-and-resume.
-- **3-D dashboard**: combined, LiDAR and thermal views, a plain-language reason for every robot decision, and a built-in
-  algorithm comparison.
+- **Batteries**: a physical energy model, per-robot capacities, energy-aware task choice, and a choice of recharge-and-resume,
+  stay home, or run until empty.
+- **3-D dashboard**: combined, LiDAR and thermal views, a strategy layer that draws who goes where and why (bids, claims,
+  zones), a plain-language reason for every robot decision, and a built-in algorithm comparison.
 
 ## Quick start
 
@@ -81,7 +83,7 @@ python -m rescue benchmark --seeds 8            # compare strategies and vision 
 python -m rescue train                          # retrain the three detectors (CPU, about 50 min each)
 python scripts/check_algorithms.py              # planners and coverage patterns → results/algorithms/
 python scripts/reliability.py                   # detection reliability → results/reliability/
-python -m pytest                                # 92 tests
+python -m pytest                                # 94 tests
 python docs/guide/build.py                      # rebuild the guide PDF (needs Edge or Chrome)
 ```
 
