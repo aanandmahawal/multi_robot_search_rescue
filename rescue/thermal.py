@@ -84,7 +84,7 @@ def add_thermal(world: World, rng: np.random.Generator) -> None:
     cfg = world.cfg
     Hf, Wf = world.height.shape
     building = cfg.building if cfg.building in AMBIENT else "office"
-    amb = AMBIENT[building] - COLLAPSE_COOLING.get(cfg.damage, 1.5)
+    amb = AMBIENT[building] - (0.0 if building == "plain" else COLLAPSE_COOLING.get(cfg.damage, 1.5))
     world.ambient = float(amb)
     drift = ndimage.gaussian_filter(rng.normal(0, 1, (Hf, Wf)), sigma=6)     # draughts, sunlit areas
     drift *= 0.8 / max(float(drift.std()), 1e-6)
@@ -103,7 +103,7 @@ def add_thermal(world: World, rng: np.random.Generator) -> None:
 
 def _bury_and_warm_victims(world: World, rng, temp) -> None:
     cfg = world.cfg
-    thin_share, thick_share = FULLY_BURIED.get(cfg.damage, FULLY_BURIED["moderate"])
+    thin_share, thick_share = (0.0, 0.0) if cfg.building == "plain" else FULLY_BURIED.get(cfg.damage, FULLY_BURIED["moderate"])
     for v in world.victims:
         cooled = rng.uniform(0, HYPOTHERMIA) if rng.random() < 0.5 else 0.0
         v.skin_temp = float(rng.uniform(*SKIN) - cooled)

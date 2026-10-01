@@ -70,7 +70,9 @@ FURNITURE = {
     "car": (1.45, (160, 30, 30)),
     "school_desk": (0.7, (176, 146, 104)),
     "bleachers": (1.2, (60, 90, 150)),
+    "crate": (0.3, (176, 140, 92)),     # low: below the LiDAR's 40 cm scan plane, and the camera sees over it
 }
+PLAIN_KINDS = ("cabinet", "shelf", "counter", "crate")    # what can be placed on the open test ground
 CAR_COLORS = [(170, 30, 35), (35, 70, 160), (220, 220, 225), (30, 30, 35), (120, 125, 130), (200, 160, 40), (40, 110, 70)]
 SOFA_COLORS = [(90, 105, 140), (140, 70, 60), (80, 120, 90), (120, 110, 100)]
 # floor colour per building: (main area, corridor / secondary, special area)
@@ -202,6 +204,7 @@ class Plan:
         self.markings: list = []
         self.bx0, self.bx1, self.by0, self.by1 = 3, W - 1, 0, H - 1
         self.mid = H // 2
+        self.custom = None          # open test ground: obstacles placed by the user
 
     def hwall(self, y, x0, x1, doors=()):
         self.wall[y, x0:x1 + 1] = True
@@ -431,6 +434,16 @@ def _layout_plain(p: Plan):
     A painted 2 m grid on the floor makes it easy to judge how straight the robots drive."""
     bx0, bx1, by0, by1 = p.bx0, p.bx1, p.by0, p.by1
     cx, cy = (bx0 + bx1) // 2, (by0 + by1) // 2
+    c = 0.5
+    for x in range(bx0 + 1, bx1 + 1, 4):                                         # painted 2 m grid
+        p.markings.append([x * c, (by0 + 1) * c, x * c, by1 * c])
+    for y in range(by0 + 1, by1 + 1, 4):
+        p.markings.append([(bx0 + 1) * c, y * c, bx1 * c, y * c])
+    if p.custom is not None:                                                      # the user's own obstacles
+        for kind, x0, y0, w, h in p.custom:
+            if kind in PLAIN_KINDS and x0 > bx0 and y0 > by0 and x0 + w <= bx1 and y0 + h <= by1:
+                p.add(kind, x0, y0, w, h)
+        return
     p.add("cabinet", cx - 2, cy - 2, 4, 4)                                        # middle
     p.add("cabinet", bx0 + 11, by0 + 9, 2, 2)
     p.add("cabinet", bx1 - 13, by1 - 11, 2, 2)
@@ -440,11 +453,6 @@ def _layout_plain(p: Plan):
     p.add("shelf", bx1 - 22, by1 - 1, 8, 1)
     p.add("counter", bx1 - 1, cy - 4, 1, 8)
     p.add("counter", bx0 + 1, by0 + 7, 1, 5)
-    c = 0.5
-    for x in range(bx0 + 1, bx1 + 1, 4):
-        p.markings.append([x * c, (by0 + 1) * c, x * c, by1 * c])
-    for y in range(by0 + 1, by1 + 1, 4):
-        p.markings.append([(bx0 + 1) * c, y * c, bx1 * c, y * c])
 
 
 LAYOUTS = {"office": _layout_office, "apartments": _layout_apartments, "hospital": _layout_hospital,
@@ -460,6 +468,9 @@ def generate(cfg: RescueConfig) -> World:
     collapse, rubble_density, buried = DAMAGE.get(cfg.damage, DAMAGE["moderate"])
     p = Plan(W, H, rng)
     bx0, bx1, by0, by1, mid = p.bx0, p.bx1, p.by0, p.by1, p.mid
+    if building == "plain":
+        p.custom = cfg.obstacles
+        buried = 0.0                                                   # the test ground is undamaged: nobody is buried
 
     # building shell: staging area x < 3, outer wall around the rest, one entrance
     p.wall[by0, bx0:] = p.wall[by1, bx0:] = True
@@ -597,7 +608,12 @@ def _try_place(world: World, rng, length_f: int, width_f: int, min_x: int = 6, k
     before = _flood(world.blocked, world.starts[0])
     cand = np.argwhere(before)
     for _ in range(300):
-        cy, cx = cand[int(rng.integers(len(cand)))]
+        if cfg.building == "plain":                 # test ground: draw from the whole grid, so that a victim only
+            cx, cy = int(rng.integers(world.W)), int(rng.integers(world.H))       # moves when an obstacle lands on its spot
+            if not before[cy, cx]:
+                continue
+        else:
+            cy, cx = cand[int(rng.integers(len(cand)))]
         if cx < min_x:
             continue
         horizontal = rng.random() < 0.5
@@ -628,7 +644,10 @@ def _try_place(world: World, rng, length_f: int, width_f: int, min_x: int = 6, k
 
 def _place_people_and_decoys(world: World, rng, buried_fraction: float) -> None:
     cfg = world.cfg
+    base_rng = rng
     for k in range(cfg.n_victims):
+        # test ground: each victim draws from its own random stream, so editing the layout moves only the victims it covers
+        rng = np.random.default_rng([cfg.seed, 7919, k]) if cfg.building == "plain" else base_rng
         placed = _try_place(world, rng, 7, 2, keep_from=[(v.x, v.y) for v in world.victims], min_gap=2.0)
         if placed is None:
             continue
@@ -671,6 +690,7 @@ def _place_people_and_decoys(world: World, rng, buried_fraction: float) -> None:
                                     segments=[li for li, _ in body], covered=covered,
                                     cover="partial" if covered else "none"))
 
+    rng = base_rng
     kinds = {
         "jacket": (3, 2, lambda: SHIRTS[rng.integers(len(SHIRTS))], 0.07),
         "bag": (2, 2, lambda: SHIRTS[rng.integers(len(SHIRTS))], 0.3),

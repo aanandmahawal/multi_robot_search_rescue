@@ -292,7 +292,7 @@ class Simulator:
 
     def _battery_low(self, r: RobotAgent) -> bool:
         """Quick check every second: is it time to head home? (straight-line distance x 1.5 for detours)"""
-        if not np.isfinite(self.capacity(r)) or r.depleted or r.cell in self.world.starts:
+        if not np.isfinite(self.capacity(r)) or r.depleted or r.cell in self.world.starts or self.cfg.drain:
             return False
         if r.low_battery:
             return True
@@ -308,8 +308,8 @@ class Simulator:
             affordable  <=>  battery left >= E_go + E_back + 5 % of capacity
         d_home comes from a distance field grown from the base on r's own map."""
         cap = self.capacity(r)
-        if not np.isfinite(cap) or r.dist_home is None:
-            return True
+        if not np.isfinite(cap) or r.dist_home is None or self.cfg.drain:
+            return True                     # run until empty: every task is taken, whatever is left
         d_home = float(r.dist_home[cell[1], cell[0]]) * self.cfg.cell
         if not np.isfinite(d_home):
             d_home = dist_m + float(np.hypot(*np.subtract(self.pos(r), self.world.to_metres(self.base.cell))))
@@ -566,7 +566,7 @@ class Simulator:
         home = min(self.world.starts, key=lambda c: r.dist[c[1], c[0]])
         d = float(r.dist[home[1], home[0]]) * cfg.cell
         cap = self.capacity(r)
-        if np.isfinite(cap) and np.isfinite(d):
+        if np.isfinite(cap) and np.isfinite(d) and not cfg.drain:
             left = self.battery_left(r)
             if r.low_battery or left <= energy_home(cfg, d) + RESERVE * cap:
                 if not r.low_battery:           # the decision sticks until the robot has recharged

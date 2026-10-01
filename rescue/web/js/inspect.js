@@ -16,6 +16,7 @@ export function initInspector() {
   marker = makeMarker(); scene.add(marker.group);
   const canvas = renderer.domElement;
   canvas.addEventListener("dblclick", e => {
+    if (store.editObstacles) return;                                  // clicks place obstacles while editing
     const hit = pickAt(e);
     if (hit) select(hit); else clearSelection();
   });
@@ -34,6 +35,7 @@ export function initInspector() {
   $("zoomOut").onclick = () => zoomBy(1.5);
   $("zoomFit").onclick = () => { clearSelection(); setView("overview"); };
   $("inspClose").onclick = clearSelection;
+  makeDraggable($("inspector"), $("inspHandle"));
   $("inspCenter").onclick = () => pick && focusOn(pick.point, 5);
   $("inspFollow").onclick = () => { if (pick && pick.robot != null) { selectRobot(pick.robot); clearSelection(); setView("follow"); } };
 
@@ -149,6 +151,32 @@ export function refreshInspector() {
   }
   $("inspRows").innerHTML = rows.map(([cls, k, v]) => `<div class="irow ${cls}"><i></i><span>${k}</span><b>${esc(v)}</b></div>`).join("");
   card.hidden = false;
+}
+
+// the card can be dragged anywhere over the view by its title; it stays where you leave it
+function makeDraggable(card, handle) {
+  const view = $("view");
+  const place = (x, y) => {
+    const v = view.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight;
+    x = Math.min(Math.max(0, x), v.width - w); y = Math.min(Math.max(0, y), v.height - h);
+    card.style.left = x + "px"; card.style.top = y + "px"; card.style.bottom = "auto";
+    return [x, y];
+  };
+  try { const p = JSON.parse(localStorage.getItem("rs-inspector") || "null"); if (p) requestAnimationFrame(() => place(...p)); } catch { /* no storage */ }
+  handle.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    e.preventDefault();
+    const c = card.getBoundingClientRect(), dx = e.clientX - c.left, dy = e.clientY - c.top;
+    card.classList.add("dragging");
+    const move = ev => { const v = view.getBoundingClientRect(); place(ev.clientX - v.left - dx, ev.clientY - v.top - dy); };
+    const up = ev => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      card.classList.remove("dragging");
+      const v = view.getBoundingClientRect();
+      try { localStorage.setItem("rs-inspector", JSON.stringify(place(ev.clientX - v.left - dx, ev.clientY - v.top - dy))); } catch { /* no storage */ }
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  });
 }
 
 function makeMarker() {

@@ -84,7 +84,8 @@ export function buildWorld() {
   });
   store.selected = Math.min(store.selected, state.robots.length - 1);
   store.viewAs = availableView(store.viewAs);
-  setView(store.viewMode === "free" ? "overview" : store.viewMode);
+  if (!store.keepCamera) setView(store.viewMode === "free" ? "overview" : store.viewMode);   // obstacle edits keep the view
+  store.keepCamera = false;
 }
 
 // ------------------------------------------------------------------ colours of the sensor pictures
@@ -144,7 +145,7 @@ function floorScene() {
   const known = state.known, searched = state.searched, W = world.W, H = world.H, P = CELL_PX, g = floorCtx;
   const b = world.config.building, pal = world.floor_palette, [tLo, tHi] = world.thermal_scale;
   const fog = layers.fog && state.t > 0;                 // before Start the building is shown as it is
-  const zonesOn = layers.zones && (world.config.strategy === "partition" || !!world.regions);
+  const zonesOn = (layers.zones || layers.strategy) && (world.config.strategy === "partition" || !!world.regions);
   const zoneColor = {};
   for (const [rid, z] of Object.entries(world.zone_of)) zoneColor[z] = hex(ROBOT_COLORS[rid % ROBOT_COLORS.length]);
   const frontier = new Set(state.frontiers.map(c => c[1] * W + c[0]));
@@ -183,6 +184,109 @@ function floorScene() {
   const s = P / world.cell;
   for (const [x1, y1, x2, y2] of world.markings) { g.beginPath(); g.moveTo(x1 * s, y1 * s); g.lineTo(x2 * s, y2 * s); g.stroke(); }
   drawPatterns(g, s);
+  drawStrategy(g, s);
+}
+
+// the team strategy, drawn on the floor (Layers: strategy):
+//   zones          partition, and the rectangles of a lawnmower / spiral: a border in each robot's colour
+//   robot -> goal  a line in the robot's colour: solid = won in the auction or a zone / pattern goal,
+//                  dashed = greedy (nearest), dotted = random
+//   claims         coordinated: around each robot's goal a filled 2 m circle (no teammate goes there) and
+//                  a dashed ring of the discount radius (teammates' goals inside it lose value)
+function drawStrategy(g, s) {
+  const { world, state, layers } = store;
+  if (!layers.strategy) return;
+  const strat = world.config.strategy, W = world.W, H = world.H, P = CELL_PX;
+  const colOf = i => hex(ROBOT_COLORS[i % ROBOT_COLORS.length]);
+  if (strat === "partition" || world.regions) {
+    const zc = {};
+    for (const [rid, z] of Object.entries(world.zone_of)) zc[z] = colOf(+rid);
+    g.lineWidth = 3; g.setLineDash([]);
+    const edge = (x1, y1, x2, y2, col) => { g.strokeStyle = col; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); };
+    for (let y = 1; y < H - 1; y++) for (let x = 4; x < W - 1; x++) {
+      const z = world.zones[y * W + x];
+      if (x + 1 < W - 1 && world.zones[y * W + x + 1] !== z) {             // vertical border: each side in its own colour
+        edge((x + 1) * P - 2, y * P, (x + 1) * P - 2, (y + 1) * P, zc[z]);
+        edge((x + 1) * P + 2, y * P, (x + 1) * P + 2, (y + 1) * P, zc[world.zones[y * W + x + 1]]);
+      }
+      if (y + 1 < H - 1 && world.zones[(y + 1) * W + x] !== z) {           // horizontal border
+        edge(x * P, (y + 1) * P - 2, (x + 1) * P, (y + 1) * P - 2, zc[z]);
+        edge(x * P, (y + 1) * P + 2, (x + 1) * P, (y + 1) * P + 2, zc[world.zones[(y + 1) * W + x]]);
+      }
+    }
+  }
+  const rad = world.config.utility_discount_radius || 4;
+  state.robots.forEach((r, i) => {
+    const goal = r.goal;
+    if (!goal || goal.kind === "home" || goal.kind === "report") return;
+    const col = colOf(i), gx = goal.x * s, gy = goal.y * s, rx = r.x * s, ry = r.y * s;
+    if (strat === "coordinated" && (goal.kind === "frontier" || goal.kind === "verify")) {
+      g.setLineDash([]); g.fillStyle = col + "2e"; g.beginPath(); g.arc(gx, gy, 2 * s, 0, 2 * Math.PI); g.fill();
+      g.setLineDash([7, 6]); g.lineWidth = 2; g.strokeStyle = col + "cc"; g.beginPath(); g.arc(gx, gy, rad * s, 0, 2 * Math.PI); g.stroke();
+    }
+    const sweep = goal.kind === "sweep" || goal.kind === "transit";
+    g.setLineDash(sweep ? [] : strat === "greedy" ? [12, 7] : strat === "random" ? [2, 7] : []);
+    g.lineWidth = 4; g.strokeStyle = "#0b1016aa"; g.beginPath(); g.moveTo(rx, ry); g.lineTo(gx, gy); g.stroke();
+    g.lineWidth = 2.5; g.strokeStyle = col; g.beginPath(); g.moveTo(rx, ry); g.lineTo(gx, gy); g.stroke();
+    g.setLineDash([]);
+    const a = Math.atan2(gy - ry, gx - rx), L = 14;                                   // arrow head at the goal
+    if (Math.hypot(gx - rx, gy - ry) > 2 * L) {
+      g.fillStyle = col; g.beginPath(); g.moveTo(gx, gy);
+      g.lineTo(gx - L * Math.cos(a - 0.4), gy - L * Math.sin(a - 0.4)); g.lineTo(gx - L * Math.cos(a + 0.4), gy - L * Math.sin(a + 0.4)); g.fill();
+    }
+    g.lineWidth = 3; g.strokeStyle = col; g.beginPath(); g.arc(gx, gy, 9, 0, 2 * Math.PI); g.stroke();
+  });
+}
+
+// a label above each robot's goal: why it goes there ("bid 4.6 = 6.0 − 0.5×2.7", "nearest · 1.4 m", "zone Z1 · 4.1 m")
+function setGoalLabel(R, r, i, show) {
+  const goal = r.goal, text = show && goal && goal.tag && goal.kind !== "home" ? `R${r.id} · ${goal.tag}` : "";
+  if (R.goalText !== text) {
+    R.goalText = text;
+    if (R.goalLabel) { dynGroup.remove(R.goalLabel); R.goalLabel.material.map.dispose(); R.goalLabel.material.dispose(); R.goalLabel = null; }
+    if (text) { R.goalLabel = labelSprite(text, hex(ROBOT_COLORS[i % ROBOT_COLORS.length]), "#0b1016", 0.62); dynGroup.add(R.goalLabel); }
+  }
+  if (R.goalLabel) R.goalLabel.position.set(goal.x, 1.45, goal.y);
+}
+
+// the card that explains the strategy on the floor
+const STRAT_TEXT = {
+  coordinated: ["Coordinated: an auction", "Every robot that needs a goal bids <b>utility = value − 0.5 × distance (m)</b> on each frontier or sighting; the best bid wins, then the next robot bids on what is left.",
+    [["solid", "a robot and the goal it won (label: its winning bid)"], ["fill", "2 m round a won goal: no teammate goes there"], ["ring", "discount radius: teammates' goals inside lose value, so the team spreads out"]]],
+  greedy: ["Greedy: nearest goal", "Every robot drives to its own nearest frontier or sighting and <b>ignores its teammates</b>. Watch them bunch up on the same opening.",
+    [["dash", "a robot and its nearest goal (label: distance)"]]],
+  partition: ["Partition: one zone per robot", "The building is split into zones; <b>each robot only searches inside its own zone</b> and never helps elsewhere.",
+    [["zone", "zone borders, in each owner's colour"], ["solid", "a robot and the nearest goal in its zone"]]],
+  random: ["Random: the baseline", "Every robot picks <b>any reachable goal at random</b>. It shows what the other strategies gain.",
+    [["dot", "a robot and its random goal"]]],
+};
+const KEY_SVG = {
+  solid: '<svg viewBox="0 0 34 14"><line x1="2" y1="7" x2="28" y2="7" stroke="#4f9cf9" stroke-width="3"/><path d="M26 2 L33 7 L26 12 z" fill="#4f9cf9"/></svg>',
+  dash: '<svg viewBox="0 0 34 14"><line x1="2" y1="7" x2="28" y2="7" stroke="#4f9cf9" stroke-width="3" stroke-dasharray="7 4"/><path d="M26 2 L33 7 L26 12 z" fill="#4f9cf9"/></svg>',
+  dot: '<svg viewBox="0 0 34 14"><line x1="2" y1="7" x2="28" y2="7" stroke="#4f9cf9" stroke-width="3" stroke-dasharray="1.5 4"/><path d="M26 2 L33 7 L26 12 z" fill="#4f9cf9"/></svg>',
+  fill: '<svg viewBox="0 0 34 14"><circle cx="17" cy="7" r="6.5" fill="#4f9cf955"/></svg>',
+  ring: '<svg viewBox="0 0 34 14"><circle cx="17" cy="7" r="6" fill="none" stroke="#4f9cf9" stroke-width="1.6" stroke-dasharray="3 2"/></svg>',
+  zone: '<svg viewBox="0 0 34 14"><rect x="1" y="1" width="15" height="12" fill="#4f9cf930"/><rect x="18" y="1" width="15" height="12" fill="#f0883e30"/><line x1="15.5" y1="1" x2="15.5" y2="13" stroke="#4f9cf9" stroke-width="2"/><line x1="18.5" y1="1" x2="18.5" y2="13" stroke="#f0883e" stroke-width="2"/></svg>',
+};
+let stratKey = "";
+function renderStratCard() {
+  const { world, layers } = store, card = $("stratCard");
+  card.hidden = !layers.strategy || !world;
+  if (card.hidden) { stratKey = ""; return; }
+  const strat = world.config.strategy, cov = world.config.coverage, key = strat + cov;
+  if (key === stratKey) return;
+  stratKey = key;
+  const [title, text, keys] = STRAT_TEXT[strat];
+  const pattern = cov !== "frontier"
+    ? `<p style="margin-top:6px">Coverage is <b>${cov === "spiral" ? "a spiral" : "a lawnmower"}</b>: each robot first sweeps its own rectangle (coloured borders, label "${cov === "spiral" ? "spiral" : "lane"} wp n/N"); the ${strat} strategy only decides the mop-up afterwards.</p>` : "";
+  const rows = (cov !== "frontier" && strat !== "partition" ? [["zone", "each robot's pattern rectangle"], ...keys] : keys)
+    .map(([k, t]) => `${KEY_SVG[k]}<span>${t}</span>`).join("");
+  card.innerHTML = `<button class="close x" title="Hide (Layers: strategy)">✕</button><b class="t">${title}</b>${text}${pattern}<div class="k">${rows}</div>`;
+  card.querySelector(".x").onclick = () => {
+    store.layers.strategy = false;
+    const box = document.querySelector('#layers input[data-layer="strategy"]'); if (box) box.checked = false;
+    updateWorld();
+  };
 }
 
 // every robot's coverage pattern (dashed: dot = start, ring = next waypoint, red cross = skipped
@@ -251,7 +355,8 @@ export function updateWorld() {
   drawFloor();
   updateSensorFx(mode);
   renderHud();
-  zoneLabels.forEach(l => l.visible = mode === "combined" && layers.zones && (world.config.strategy === "partition" || !!world.regions));
+  zoneLabels.forEach(l => l.visible = mode === "combined" && (layers.zones || layers.strategy) && (world.config.strategy === "partition" || !!world.regions));
+  renderStratCard();
 
   // victims appear when the page first hears of them (unknown count: only once found)
   for (const v of state.victims) if (!victims3d[v.id]) {
@@ -287,6 +392,7 @@ export function updateWorld() {
     if (r.goal) R.goal.position.set(r.goal.x, 0.6, r.goal.y);
     R.cone.visible = layers.fov && world.has_cameras && mode !== "lidar";
     setRobotLabel(R, r, i);
+    setGoalLabel(R, r, i, layers.strategy && mode === "combined");
     setScan(R, r, r.scan || [], world.config.lidar_height, world.has_lidar && mode !== "thermal");
   });
 }
@@ -356,6 +462,7 @@ export function cellOfInstance(mesh, id) {
 const NAMES = {
   desk: "Office desk", table: "Table", school_desk: "School desk", bed: "Bed", hospital_bed: "Hospital bed", sofa: "Sofa",
   counter: "Kitchen counter", shelf: "Bookshelf", cabinet: "Filing cabinet", car: "Parked car", bleachers: "Bleachers",
+  crate: "Low crate (under the LiDAR)",
 };
 const nice = k => NAMES[k] || k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, " ");
 

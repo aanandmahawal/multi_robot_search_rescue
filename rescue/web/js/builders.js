@@ -167,6 +167,11 @@ export function createBuilder(world, group) {
         }
         break;
       }
+      case "crate": {                                  // low wooden crate: under the LiDAR's scan plane
+        pushBox(x, 0, z, sx * 0.9, it.height, sy * 0.9, 0xb08c5c, nav);
+        for (const t of [-0.3, 0, 0.3]) pushBox(x, it.height - 0.005, z + t * sy * 0.9, sx * 0.92, 0.012, 0.03, 0x7a5c36, nav);
+        break;
+      }
       case "cabinet": {
         pushBox(x, 0, z, sx * 0.92, it.height, sy * 0.92, 0x9ea5ad, nav);
         const alongX = sx >= sy, n = Math.max(2, Math.round((alongX ? sx : sy) / 0.4));

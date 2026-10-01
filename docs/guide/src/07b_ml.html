@@ -1,0 +1,77 @@
+<h2>7.7 Deep dive: what exactly goes into the network</h2>
+<p>A neural network only sees numbers. Each camera frame becomes a stack of 48 × 64 arrays ("channels"), each scaled to the range 0–1 so that no channel dominates just
+because its units are larger:</p>
+<table>
+<tr><th>Channel</th><th>Raw value</th><th>Scaled to 0–1 as</th><th>Used by</th></tr>
+<tr><td>red, green, blue</td><td>colour 0–255</td><td>÷ 255 (already 0–1 from the renderer)</td><td>colour, fused</td></tr>
+<tr><td>depth</td><td>metres along the pixel's ray</td><td>depth / (camera range + 2 m), clipped: 0 = at the lens, 1 = 7 m or nothing hit</td><td>all three</td></tr>
+<tr><td>temperature</td><td>°C</td><td>(T − 10 °C) / 40 °C, clipped: 10 °C → 0, 50 °C → 1</td><td>thermal, fused</td></tr>
+</table>
+<p>Depth is in every detector for a reason: it tells the network how big an object really is. A warm blob 10 pixels wide is a small animal if it is 1 m away but a whole
+person if it is 4 m away. Temperature uses an <i>absolute</i> scale (a radiometric camera measures degrees), so 33 °C always maps to the same number, 0.58.</p>
+<pre>stack  = [R, G, B, depth/7, (T−10)/40]        # 5 × 48 × 64 floats, one frame
+colour = stack[0:4]   thermal = stack[3:5]   fused = stack[0:5]      # MODALITIES in perception.py</pre>
+
+<h2>7.8 Layer by layer</h2>
+<table>
+<tr><th>Layer</th><th>Output size</th><th>Weights</th><th>Receptive field*</th><th>What it does</th></tr>
+<tr><td>conv 3×3, 16 + BN + ReLU</td><td>16 × 48 × 64</td><td>736 + 32</td><td>3 px</td><td>edges, colour and temperature steps</td></tr>
+<tr><td>conv 3×3, 16 + BN + ReLU</td><td>16 × 48 × 64</td><td>2,320 + 32</td><td>5 px</td><td>small textures</td></tr>
+<tr><td>max-pool 2×2</td><td>16 × 24 × 32</td><td>0</td><td>6 px</td><td>halve the resolution, keep the strongest response</td></tr>
+<tr><td>conv 3×3, 32 (×2)</td><td>32 × 24 × 32</td><td>4,640 + 9,248 + 128</td><td>14 px</td><td>parts: a head, an arm, a warm patch</td></tr>
+<tr><td>max-pool 2×2</td><td>32 × 12 × 16</td><td>0</td><td>16 px</td><td>one cell = one 4 × 4-pixel block</td></tr>
+<tr><td>conv 3×3, 48, dilation 1</td><td>48 × 12 × 16</td><td>13,872 + 96</td><td>24 px</td><td>combine parts</td></tr>
+<tr><td>conv 3×3, 48, dilation 2</td><td>48 × 12 × 16</td><td>20,784 + 96</td><td>40 px</td><td>wider context</td></tr>
+<tr><td>conv 3×3, 48, dilation 4</td><td>48 × 12 × 16</td><td>20,784 + 96</td><td>72 px</td><td>the whole body and its surroundings</td></tr>
+<tr><td>conv 1×1 → sigmoid</td><td>1 × 12 × 16</td><td>49</td><td>72 px</td><td>probability per block</td></tr>
+<tr><td colspan="2"><b>total</b></td><td><b>72,913</b> (fused) · 72,769 (colour) · 72,481 (thermal)</td><td colspan="2">about 7 ms per frame on one CPU core</td></tr>
+</table>
+<p class="small">* Receptive field: how many input pixels, across, can influence one output. A dilated convolution with dilation d spaces its 3 taps d cells apart, so it adds 2·d·(current
+stride) pixels without adding weights. 72 pixels is more than the image's 64-pixel width: every output block can "see" the whole frame, which is what lets the network tell a
+1.75 m body from a 0.75 m dog.</p>
+
+<h2>7.9 Training, in code</h2>
+<pre>net = build_net(channels);  opt = AdamW(lr = 0.002, weight_decay = 1e-4);  schedule = cosine over 20 epochs
+pos_weight = sqrt(min(20, (1 − p) / p))            # p = share of "person" blocks in the training labels
+for epoch in 1..20:
+    for each batch of 64 images (random order):
+        if coin flip: mirror images and labels left-right          # augmentation
+        loss = BCEWithLogits(net(images), labels, pos_weight)       # per 4×4 block
+        loss.backward();  opt.step()                                 # gradient descent</pre>
+<p><b>Binary cross-entropy</b> punishes confident mistakes most: predicting 0.99 for a block with no person costs −ln(0.01) = 4.6, predicting 0.6 costs 0.9. Because only a few percent
+of blocks show a person, each person block's loss is multiplied by <code>pos_weight</code>. If 3 % of blocks were positive, (0.97/0.03) = 32 would be capped at 20, giving √20 ≈ 4.5.
+The square root is a compromise: enough weight to stop the network ignoring people, not so much that every warm blob becomes a person. <b>Cosine decay</b> lowers the learning rate smoothly
+to zero over the 20 epochs, and <b>AdamW</b> adapts the step size per weight, with weight decay to keep the weights small (less over-fitting).</p>
+
+<h3>What the test scores mean</h3>
+<p>On the 4,000 unseen test images, 1,111 contain a visible person. Using the fused detector at a 0.5 threshold as an example:</p>
+<ul>
+<li><b>Recall 98.3 %</b>: of the 1,111 images with a person, about 1,092 are flagged. About 19 are missed (typically a person seen edge-on, far away or mostly hidden).</li>
+<li><b>Precision 83 %</b>: of all flagged images, 83 % really contain a person, so roughly 220 flags are look-alikes (dogs, warm rubble, bags).</li>
+<li><b>ROC-AUC 0.994</b>: pick one image with a person and one without; 99.4 % of the time the one with the person gets the higher score. It is independent of the threshold.</li>
+<li><b>Heatmap average precision 0.993</b>: the same idea per 4 × 4 block. It measures whether the network points at the right <i>place</i>, not just the right image.</li>
+</ul>
+<p>Single-image precision of 83 % would be far too many false alarms to hand to rescuers. That is exactly why the robots use a higher threshold (0.92, not 0.5) and the belief filter:
+repeated close looks from several angles lift the <i>reported</i> precision to 88–89 % (chapter 14).</p>
+
+<div class="box simple"><b>In simple words</b>
+<p>The network is like a new rescuer who has studied 20,000 photos of collapsed rooms. They are good at spotting people, sometimes fooled by a dog in the dark, and never allowed to
+report a person after one glance. The team makes them walk closer and look again, from another side, until the evidence is overwhelming.</p></div>
+
+<h2>7.10 The three detectors on hard cases</h2>
+<figure><img src="img/ml_examples.png">
+<figcaption><b>Figure 7.4</b> One person, one dog and one jacket, each seen from about 2 m, and what each detector makes of them (brighter = more likely a person; "max" is the highest block).
+All three are certain about the person. The <b>jacket</b> fools nobody here: it is cold, and its shape is wrong. The <b>dog</b> is the hard case. The thermal detector stays low (0.37), because
+the warm shape is too small. But the colour and fused detectors reach 0.92, exactly the detection threshold. Only repeated, close, confident looks can confirm such a sighting.</figcaption></figure>
+
+<h2>7.11 What ML does <i>not</i> do here, and why</h2>
+<ul>
+<li><b>It does not drive the robot.</b> No reinforcement learning, no learned policy. Every decision in chapters 8–11 is an explicit, explainable rule, and the dashboard prints the reason for each one.
+This is a deliberate choice for a safety-critical task: you can always say <i>why</i> a robot did something.</li>
+<li><b>It does not build the map.</b> The occupancy grid is Bayesian evidence from LiDAR, camera and bumper.</li>
+<li><b>It does not output bounding boxes.</b> A heatmap suits this problem better. People lie in any orientation, are often partly covered, and several can be in one frame. A heatmap marks
+<i>every</i> visible body part, and the depth at the peak block places it on the map directly. A box detector such as YOLO would need anchor boxes, a much larger model and far more training data.</li>
+<li><b>It has never seen a real photo.</b> Trained only on simulated images, it would need real or domain-randomised data before use on a real robot (the sim-to-real gap, chapter 15).</li>
+<li><b>It can be swapped.</b> <code>python -m rescue train</code> retrains the detectors. Any other detector only has to return the same 12 × 16 heatmap from
+<code>CNNDetector.heatmap</code>, and nothing downstream changes.</li>
+</ul>

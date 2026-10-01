@@ -2,11 +2,12 @@
 // switch (Combined / LiDAR / Thermal), the Layers menu, the panel switches, keyboard shortcuts,
 // and presets in the address bar.
 import { EXPLAIN, LAYERS, PHASE_TEXT, SENSORS, SPEEDS, VIEWS } from "./config.js";
+import { obstacleParam, setEditing } from "./edit.js";
 import { store } from "./store.js";
 import { $ } from "./util.js";
 
 const SELECTS = ["building", "damage", "strategy", "planner", "coverage", "avoidance", "battery"];
-const SLIDERS = ["robots", "victims", "rspeed", "camrange", "lidarrange", "density"];
+const SLIDERS = ["robots", "victims", "rspeed", "camrange", "lidarrange"];
 const SEGS = [["knownSeg", "known"], ["varySeg", "vary"], ["revisitSeg", "revisit"], ["deadendSeg", "deadend"], ["rechargeSeg", "recharge"]];
 const EACH_WH = ["0", "10", "5", "3", "2", "1.5", "1"];      // choices for one robot's battery ("0" = unlimited)
 
@@ -37,7 +38,8 @@ export const missionParams = () => ({
   speed: $("rspeed").value, battery: $("battery").value === "each" ? 0 : $("battery").value, recharge: store.recharge,
   ...($("battery").value === "each" ? { battery_each: batteryEachList().join(",") } : {}),
   camrange: $("camrange").value, lidarrange: $("lidarrange").value,
-  density: $("density").value, revisit: store.revisit, deadend: store.deadend,
+  revisit: store.revisit, deadend: store.deadend,
+  ...($("building").value === "plain" ? obstacleParam() : {}),
   // "Vary each run": new random numbers for every run in the same building
   ...(store.vary === "1" ? { run: Math.floor(Math.random() * 1e6) } : {}),
   ...store.preset,
@@ -48,7 +50,10 @@ export function refreshHints() {
   $("hint-damage").textContent = EXPLAIN.damage[$("damage").value];
   $("hint-known").textContent = EXPLAIN.known[store.known];
   $("hint-strategy").textContent = EXPLAIN.strategy[$("strategy").value];
-  $("hint-density").textContent = EXPLAIN.density;
+  $("hint-obstacles").textContent = EXPLAIN.obstacles;
+  const plain = $("building").value === "plain";             // the open test ground has no damage, but your own obstacles
+  $("damageGroup").hidden = plain;
+  $("plainTools").hidden = !plain;
   $("hint-vary").textContent = EXPLAIN.vary[store.vary];
   $("hint-planner").textContent = EXPLAIN.planner[$("planner").value];
   $("hint-coverage").textContent = EXPLAIN.coverage[$("coverage").value];
@@ -62,7 +67,6 @@ export function refreshHints() {
   $("hint-ranges").textContent = EXPLAIN.ranges;
   $("countRow").hidden = store.known !== "1";
   for (const id of SLIDERS) $(id + "Out").textContent = $(id).value;
-  $("densityOut").textContent = $("density").value + "×";
   $("rspeedOut").textContent = $("rspeed").value;
   for (const [seg, key] of SEGS)
     document.querySelectorAll(`#${seg} button`).forEach(b => b.classList.toggle("on", b.dataset[key] === store[key]));
@@ -123,7 +127,8 @@ export function initControls(h) {
     if (newBuilding) store.seed = Math.floor(Math.random() * 100000);
     refreshHints(); clearTimeout(timer); timer = setTimeout(h.onNewMission, 300);
   };
-  for (const id of ["building", "damage", "density"]) $(id).addEventListener("change", () => changed(true));
+  for (const id of ["building", "damage"]) $(id).addEventListener("change", () => { store.obstacles = null; setEditing(false); changed(true); });
+  // (the open test ground's layout editor wires its own buttons: edit.js)
   for (const id of ["strategy", "planner", "coverage", "avoidance", "battery", "robots", "victims", "rspeed", "camrange", "lidarrange"])
     $(id).addEventListener("change", () => changed(false));
   onBatteryChange = () => changed(false);
@@ -202,7 +207,7 @@ function applyPresets() {
   if (q.has("vary")) store.vary = q.get("vary") === "1" ? "1" : "0";
   if (q.has("revisit")) store.revisit = q.get("revisit") === "0" ? "0" : "0.3";
   if (q.has("deadend")) store.deadend = q.get("deadend") === "0" ? "0" : "1";
-  if (q.has("recharge")) store.recharge = q.get("recharge") === "0" ? "0" : "1";
+  if (q.has("recharge")) store.recharge = ["0", "drain"].includes(q.get("recharge")) ? q.get("recharge") : "1";
   if (q.has("battery_each")) { $("battery").value = "each"; store.batteryEach = q.get("battery_each").split(","); }
   if (q.has("seed")) store.seed = +q.get("seed");
   if (q.has("view")) store.viewMode = q.get("view");

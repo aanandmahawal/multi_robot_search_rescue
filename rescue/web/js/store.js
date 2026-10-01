@@ -17,7 +17,12 @@ export const store = {
   vary: "0",            // "1" = every run draws new random numbers (same building, different paths)
   revisit: "0",         // route cost per earlier visit of a cell ("0" = shortest routes)
   deadend: "1",         // dead-end / loop recovery on
-  recharge: "1",        // "1" = a robot back on low battery recharges and goes out again
+  recharge: "1",        // low battery: "1" recharge and go out again · "0" stay home · "drain" never go home, stop when empty
+  obstacles: null,      // open test ground: your own obstacles [[kind, x, y, w, h], ...] (null = the default set)
+  editObstacles: false, // "Place obstacles" is on: clicks on the floor add / remove obstacles
+  keepCamera: false,    // the next rebuilt building keeps the camera where it is (obstacle edits)
+  editTool: "add",      // layout editor tool: add | remove
+  editAfterReset: false,// "Restart to edit": open the editor once the new mission is ready
   batteryEach: [],      // per-robot capacities (Wh) when Battery = "Different per robot"
   compareJob: null,     // the running algorithm comparison (Stats tab)
   seed: Math.floor(Math.random() * 100000),

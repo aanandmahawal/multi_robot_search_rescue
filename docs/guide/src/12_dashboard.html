@@ -12,9 +12,9 @@ Below each reason: the planner used, route length, cells expanded, time, energy 
 <table>
 <tr><th style="width:18%">Control</th><th style="width:22%">Options</th><th>What changes in the robots' behaviour</th></tr>
 <tr><td><b>Building</b></td><td>office, apartments, hospital, school, parking, warehouse, open test ground</td><td>A new building of that type (chapter 3). Layouts change how useful each coverage pattern is: long corridors favour frontier exploration, open halls the lawnmower.</td></tr>
-<tr><td><b>Damage</b></td><td>light, moderate, severe</td><td>More collapsed walls, rubble and buried victims (10/25/45 % of interior walls collapse; 20/40/60 % of victims partly buried; up to 20 % under thick rubble).</td></tr>
-<tr><td><b>Rubble</b></td><td>0–3×</td><td>Multiplies the number of rubble piles: more obstacles, more replanning, more hidden victims.</td></tr>
-<tr><td><b>New random building</b></td><td>button</td><td>Same type, new seed, so a different layout.</td></tr>
+<tr><td><b>Damage</b></td><td>light, moderate, severe</td><td>More collapsed walls, rubble and buried victims (10/25/45 % of interior walls collapse; 20/40/60 % of victims partly buried; up to 20 % under thick rubble). Hidden for the test ground, which is never damaged.</td></tr>
+<tr><td><b>New random building</b></td><td>button</td><td>Same type, new seed, so a different layout. Hidden for the test ground.</td></tr>
+<tr><td><b>Obstacle editor</b> (test ground only)</td><td>tall blocks, walls, low crates · Edit layout · Add / Remove · Undo / Default / Clear all · obstacle list</td><td>Press <i>Edit layout</i> and pick a tool. With <i>Add</i>, a click on free floor places the chosen obstacle (a green ghost shows where; red means the spot is taken). With <i>Remove</i>, the obstacle under the mouse turns red and a click deletes it; it is picked on its 3-D shape, so a tall block can be clicked anywhere. The list shows every obstacle with its size and position: hovering a row highlights it, ✕ deletes it. A click only counts if the mouse did not move, and double-clicks are ignored, so nothing is added twice. Editing is only possible before the mission: <i>Start</i> ends it, and while a mission runs the layout is locked (<i>Restart to edit</i>). Changing the layout never moves the victims. A low crate lies under the LiDAR's scan plane, so only the depth camera close up or the bumper finds it. Obstacles that would seal off part of the ground are refused.</td></tr>
 <tr><td><b>Number inside</b></td><td>Unknown / Known (+ how many, 1–16)</td><td><i>Unknown</i> (realistic): 4–12 hidden victims, and the robots search everything. <i>Known</i>: they stop and go home once that many are confirmed (a false alarm can make them stop early).</td></tr>
 <tr><td><b>Robots</b></td><td>1–8</td><td>Team size. Patterns split the building into that many rectangles; strategies spread that many robots.</td></tr>
 <tr><td><b>Strategy</b></td><td>coordinated, partition, greedy, random</td><td>Who takes which frontier or sighting (8.5). With lawnmower or spiral: used for the mop-up after the patterns.</td></tr>
@@ -26,7 +26,7 @@ Below each reason: the planner used, route length, cells expanded, time, energy 
 <tr><td><b>Dead ends</b></td><td>Recover / Off</td><td>Detect loops and blockages, back off and put the goal on a 60 s tabu list (10.5). <i>Off</i> shows what happens without it.</td></tr>
 <tr><td><b>Speed</b></td><td>0.2–1.5 m/s</td><td>Faster robots finish sooner, but the cameras still look once per second, and motor losses grow with speed².</td></tr>
 <tr><td><b>Battery</b></td><td>unlimited, 10…1 Wh, different per robot</td><td>Energy-aware task choice, turning home in time, recharging (chapter 11). <i>Different per robot</i> shows one choice per robot.</td></tr>
-<tr><td><b>At base</b></td><td>Recharge / Stay</td><td>After coming home on low battery: charge at 60 W and go back out, or stay home.</td></tr>
+<tr><td><b>When low</b></td><td>Recharge / Stay / Run empty</td><td><i>Recharge</i>: go home in time, charge at 60 W and go back out. <i>Stay</i>: go home in time and stay. <i>Run empty</i>: ignore the battery, take any task, and stop exactly where the battery dies, without coming back.</td></tr>
 <tr><td><b>Sensors on the robots</b></td><td>Combined / Vision + Thermal / LiDAR</td><td><i>Combined</i>: the LiDAR maps, the cameras find people. <i>Vision + Thermal</i>: no LiDAR, so the map grows only where the depth camera looks. <i>LiDAR</i>: no camera, so the building gets mapped but <b>nobody can be found</b>.</td></tr>
 <tr><td><b>Camera / LiDAR range</b></td><td>2–8 m / 3–20 m</td><td>How far each sensor reaches. The camera range also sets the lawnmower's lane spacing.</td></tr>
 </table>
@@ -36,7 +36,7 @@ Below each reason: the planner used, route length, cells expanded, time, energy 
 <li><b>Show as</b>: <i>Combined</i> (the building as it is, plus findings), <i>LiDAR</i> (only what the lasers know: violet where beams hit), <i>Thermal</i> (only what the thermal cameras measured,
 hatched where nobody looked). Keys <span class="kbd">1</span> <span class="kbd">2</span> <span class="kbd">3</span>.</li>
 <li><b>Camera views</b>: overview, top-down, follow the selected robot. Drag to rotate, right-drag to move, scroll to zoom, double-click to select and zoom.</li>
-<li><b>Layers</b>: victim flags, fog over unmapped/unsearched floor, robot paths and goals, coverage patterns, where each robot has driven, camera cones, sightings and false alarms,
+<li><b>Layers</b>: victim flags, fog over unmapped/unsearched floor, robot paths and goals, the <b>strategy</b> drawn on the floor (8.5), coverage patterns, where each robot has driven, camera cones, sightings and false alarms,
 zones, the planner search of the selected robot (cells examined, RRT* tree, ant trails), and repeat visits.</li>
 <li><b>Legend</b>: what every colour means in the current picture.</li>
 <li><b>Transport</b>: Start / Pause, +1 s (one step), speed 1×–30× simulated seconds per real second, Restart.</li>

@@ -45,6 +45,7 @@ export const LAYERS = [
   ["flags", "Victim flags and bodies"],
   ["fog", "Shade what is not mapped / not searched"],
   ["paths", "Robot paths and goals"],
+  ["strategy", "Strategy: who goes where, and why"],
   ["pattern", "Coverage patterns (lawnmower / spiral)"],
   ["trail", "Where each robot has driven"],
   ["fov", "Camera view cones"],
@@ -57,7 +58,7 @@ export const LAYERS = [
 export const PHASE_TEXT = { loading: "Loading", ready: "Ready", running: "Running", paused: "Paused", finished: "Finished" };
 
 export const EXPLAIN = {
-  density: "How much rubble lies in the rooms, on top of what the damage level says. 1× = normal, 0 = none, 3× = three times as many piles. Rubble blocks robots and hides victims; more of it makes routes longer and dead ends likelier. Changing it builds a new building.",
+  obstacles: "Open test ground only, before the mission starts. Press Edit layout, then use Add (click free floor: a green ghost shows where the obstacle goes, red means the spot is taken) or Remove (click an obstacle: it turns red under the mouse). The list shows every obstacle; ✕ removes one, and hovering highlights it in the view. Undo, Default and Clear all work at any time before Start; Esc or Done ends editing. Pressing Start locks the layout; Restart unlocks it. Tall blocks and walls stop the LiDAR and the cameras. A low crate (30 cm) lies under the LiDAR's 40 cm scan plane: the laser cannot see it and the camera looks over it, so robots only notice it with the depth camera close up or the bumper. Obstacles that would seal off part of the ground are refused. Default restores the original layout; Clear all empties the hall.",
   vary: {
     "0": "Repeatable: the same settings give exactly the same mission, move for move (every random choice comes from the building's seed). This is what makes a fair comparison possible.",
     "1": "Vary each run: the building stays the same, but every run draws new random numbers for sensor noise, tie-breaks between equally good goals, RRT* samples and ant choices. Robots then take different paths in the same building.",
@@ -90,6 +91,7 @@ export const EXPLAIN = {
   recharge: {
     "1": "Recharge: a robot that came home on low battery docks at the base (60 W charger: 1 Wh per minute), charges to full and goes back out, continuing its coverage pattern where it left it.",
     "0": "Stay: a robot that came home on low battery stays at the base for the rest of the mission; its unfinished area is left to its teammates.",
+    drain: "Run empty: the robots ignore their battery. They never turn home and take any task, however far; when a battery is flat the robot stops exactly where it is and waits to be recovered. Compare with Recharge to see what the battery rules are worth.",
   },
   ranges: "How far the sensors reach. The camera range limits how far a robot can search for people (and sets the lawnmower lane width); the LiDAR range how far it maps walls. Longer range = fewer trips.",
   building: {
@@ -99,7 +101,7 @@ export const EXPLAIN = {
     school: "School: classrooms with rows of desks along a corridor, and a large gym with bleachers.",
     parking: "Parking garage: two rows of parked cars, pillars and a wide driving lane. Cars block the cameras and the laser; some still have a warm engine.",
     warehouse: "Warehouse: offices along the top and a big hall with pillars and tall storage racks that block the view.",
-    plain: "Open test ground: one empty hall with a few fixed obstacles (a block in the middle, two crates, cabinets in the four corners, shelves and counters along the walls) and a painted 2 m grid. No rubble, no look-alikes, no warm objects: made to watch how the coverage patterns and route planners behave. The obstacles are the same every time; only the victims move."
+    plain: "Open test ground: one undamaged hall with a painted 2 m grid, no rubble, no look-alikes, no warm objects and nobody buried: made to watch how the coverage patterns, strategies and route planners behave. It starts with a few obstacles (a block in the middle, crates, cabinets in the corners, shelves and counters along the walls); place your own with the obstacle editor below."
   },
   damage: {
     light: "Light: few collapsed walls, little rubble. About 20 % of victims are partly buried and 5 % lie under thin debris.",

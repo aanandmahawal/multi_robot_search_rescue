@@ -359,6 +359,60 @@ def fig_reliability():
     save(fig, "reliability.png")
 
 
+
+
+# ------------------------------------------------------------------ 11. the three detectors on a person, a dog and a jacket
+def _view_of(w, tx, ty, lo=1.4, hi=2.8):
+    """A free cell lo..hi m from (tx, ty) with a clear view of it; returns (x, y, heading)."""
+    best = None
+    for cy, cx in np.argwhere(w.reachable & ~w.blocked):
+        px, py = w.to_metres((cx, cy))
+        d = np.hypot(px - tx, py - ty)
+        if lo < d < hi and line_of_sight(w, (px, py), (tx, ty)):
+            if best is None or abs(d - 2.0) < best[0]:
+                best = (abs(d - 2.0), px, py)
+    return None if best is None else (best[1], best[2], float(np.arctan2(ty - best[2], tx - best[1])))
+
+
+def fig_ml_examples():
+    from rescue.perception import CNNDetector, frame_to_label
+    rows = []
+    for seed in range(1, 40):
+        w = generate(RescueConfig(building="apartments", seed=seed, vision="fusion"))
+        person = next((v for v in w.victims if v.cover == "none"), None)
+        dog = next((d for d in w.thermal_decoys if d.kind == "dog"), None)
+        jacket = next((d for d in w.decoys if d.kind == "jacket"), None)
+        if person and dog and jacket:
+            targets = [("a person", person.x, person.y), ("a dog (33 °C)", dog.x, dog.y), ("a jacket", jacket.x, jacket.y)]
+            poses = [_view_of(w, x, y) for _, x, y in targets]
+            if all(poses):
+                rows = [(name, pose) for (name, *_), pose in zip(targets, poses)]
+                break
+    dets = {m: CNNDetector(RescueConfig(vision=m), m) for m in ("cnn", "thermal", "fusion")}
+    fig, axes = plt.subplots(3, 6, figsize=(13, 5.6))
+    cols = ["colour image", "thermal image", "true label\n(blocks showing a person)", "colour AI heatmap", "thermal AI heatmap", "fused AI heatmap"]
+    rng = np.random.default_rng(5)
+    for r, (name, (x, y, h)) in enumerate(rows):
+        f = render(w, x, y, h, rng)
+        lab = frame_to_label(f, "thermal")
+        panels = [f.rgb, palette(to_unit(f.thermal, w.ambient)), lab]
+        for m in ("cnn", "thermal", "fusion"):
+            panels.append(dets[m].heatmap(f))
+        for c, p in enumerate(panels):
+            ax = axes[r, c]
+            if c < 2:
+                ax.imshow(p)
+            else:
+                ax.imshow(p, cmap="magma", vmin=0, vmax=1, extent=(0, 64, 48, 0))
+                if c >= 3:
+                    ax.text(2, 45, f"max {p.max():.2f}", color="white", fontsize=7)
+            ax.set_xticks([]); ax.set_yticks([])
+            if r == 0:
+                ax.set_title(cols[c], fontsize=8.5)
+        axes[r, 0].set_ylabel(name, fontsize=9)
+    save(fig, "ml_examples.png")
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or [n[4:] for n in list(globals()) if n.startswith("fig_")]
     for n in which:

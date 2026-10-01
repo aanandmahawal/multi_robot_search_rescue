@@ -1,6 +1,6 @@
 <h1><span class="num">13</span>Software architecture</h1>
 <p class="lead">The project is about 9,000 lines: a Python package <code>rescue/</code> (simulation, AI and a small web server), a JavaScript 3-D front end that uses
-three.js, scripts for experiments, and 92 automated tests. Nothing needs a GPU; PyTorch is used on the CPU for the detector.</p>
+three.js, scripts for experiments, and 94 automated tests. Nothing needs a GPU; PyTorch is used on the CPU for the detector.</p>
 
 <h2>13.1 Modules</h2>
 <table>
@@ -75,7 +75,7 @@ builds the building once with instanced meshes, then each step repaints the floo
 between states for smooth animation.</p>
 
 <h2>13.4 Tests and scripts</h2>
-<p><b>92 tests</b> (<code>pytest</code>, about 6 minutes) check the maths and the behaviour: A* returns Dijkstra's optimal length while expanding fewer cells; the octile heuristic
+<p><b>94 tests</b> (<code>pytest</code>, about 6 minutes) check the maths and the behaviour: A* returns Dijkstra's optimal length while expanding fewer cells; the octile heuristic
 never overestimates; every planner returns a valid route never shorter than the optimum; Bresenham lines have octile length; RRT* tree costs stay consistent after rewiring;
 lanes are at most w apart; spirals go outside-in and always turn the same way; robots really drive their patterns (every reached waypoint was driven through, the median
 distance from the pattern is at most 0.36 m); every navigation option searches 100 % of the building; robots never drive faster than their speed; the same settings give the same
@@ -89,7 +89,7 @@ numbers add up.</p>
 <tr><td><code>python -m rescue benchmark --seeds 8</code></td><td>compare strategies and vision modes over many buildings</td></tr>
 <tr><td><code>python scripts/check_algorithms.py</code></td><td>planners and coverage patterns on the test ground → <code>results/algorithms/</code></td></tr>
 <tr><td><code>python scripts/reliability.py</code></td><td>every confirmation checked against the truth → <code>results/reliability/report.md</code></td></tr>
-<tr><td><code>python -m pytest</code></td><td>the 92 tests</td></tr>
+<tr><td><code>python -m pytest</code></td><td>the 94 tests</td></tr>
 </table>
 
 <div class="box tip"><b>Interview tip: "how is your code structured?"</b>

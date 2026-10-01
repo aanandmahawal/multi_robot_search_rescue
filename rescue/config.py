@@ -22,6 +22,7 @@ class RescueConfig:
     height: int = 40
     cell: float = 0.5           # metres per navigation cell (the camera renders at cell / 2)
     building: str = "office"    # office | apartments | hospital | school | parking | warehouse | plain (open test ground)
+    obstacles: tuple | None = None  # plain only: your own obstacles, ((kind, x0, y0, w, h), ...) in cells; None = the default set
     damage: str = "moderate"    # light | moderate | severe  (collapse, rubble, buried victims)
     n_victims: int = 10         # how many victims are really inside
     victims_known: bool = False # do the robots know that number? (then they stop once all are found)
@@ -76,6 +77,7 @@ class RescueConfig:
     battery_wh: float = 0.0         # battery capacity in watt-hours (every robot); 0 = unlimited
     battery_each: tuple = ()        # per-robot capacities in Wh (robot i gets battery_each[i]; 0 = unlimited)
     recharge: bool = True           # a robot that went home on low battery recharges at the base and goes back out
+    drain: bool = False             # run until empty: no turning home, a robot works until its battery is flat and stops there
     charge_power: float = 60.0      # W the base's charger delivers (1 Wh per minute)
     obstacle_density: float = 1.0   # multiplies the number of rubble piles (1 = as the damage level says)
     revisit_penalty: float = 0.0    # extra route cost (cells) per earlier team visit of a cell, up to 5 visits

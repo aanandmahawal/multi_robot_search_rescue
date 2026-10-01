@@ -48,6 +48,11 @@ are the frontier mop-up and the drive home.</figcaption></figure>
 <tr><td><b>coordinated</b></td><td>sequential auction on utility = value − 0.5 × distance, with value cut near teammates' goals (Burgard et al. 2005)</td><td>spreads the team out, one robot per sighting</td><td>needs communication</td></tr>
 </table>
 
+<figure><img src="img/strategy_view.png">
+<figcaption><b>Figure 8.4b</b> The <i>strategy</i> layer during a coordinated mission on the test ground (16 s). A line in each robot's colour runs to the goal it won, and the label above
+the goal is its winning bid. Around a won goal, the shaded 2 m circle is closed to teammates and the dashed ring marks the discount radius. With partition the layer
+draws each zone's border in its owner's colour instead; greedy goals have dashed lines, random goals dotted ones. The card top right explains the current strategy.</figcaption></figure>
+
 <h3>The auction, step by step</h3>
 <p>All robots that need a goal take part. Every goal has a <b>value</b> (frontier: its number of cells; sighting: 30 × the current belief that it is a person) and a
 <b>distance</b> for each robot. Then:</p>

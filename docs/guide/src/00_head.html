@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>RescueThermal AI: The Complete Guide</title>
+<title>RescueSim: The Complete Guide</title>
 <style>
 @page { size: A4; margin: 15mm 14mm 16mm 14mm;
   @bottom-center { content: counter(page); font: 9pt "Segoe UI", sans-serif; color: #7a8594; }
-  @top-right { content: "RescueThermal AI · The Complete Guide"; font: 8pt "Segoe UI", sans-serif; color: #a0a9b5; } }
+  @top-right { content: "RescueSim · The Complete Guide"; font: 8pt "Segoe UI", sans-serif; color: #a0a9b5; } }
 @page :first { @bottom-center { content: none; } @top-right { content: none; } }
 :root { --ink: #1d2733; --soft: #4a5868; --line: #d9dee5; --accent: #1f6fd1; --accent2: #0f4c99; --warm: #d9622b;
         --green: #1e8449; --bg1: #f3f7fc; --bg2: #fff6ec; --bg3: #eef8f1; --bg4: #fdf0f0; }
@@ -87,7 +87,8 @@ svg text { font-family: "Segoe UI", Arial, sans-serif; }
 
 <section class="cover">
   <div class="band">
-    <h0>RescueThermal AI</h0>
+    <h0>RescueSim</h0>
+    <div class="sub" style="font-weight:600;margin-bottom:3mm">Multi-Robot Search &amp; Rescue Simulator · LiDAR · RGB-D · Thermal</div>
     <div class="sub">How a team of robots searches an unknown, damaged building for people,
     explained from first principles, down to the code</div>
   </div>
@@ -106,14 +107,14 @@ svg text { font-family: "Segoe UI", Arial, sans-serif; }
 
 <h1 style="break-before:page">Contents</h1>
 <div class="toc">
-<div><b>1 · The project in one picture</b><span>What the robots do · the one-second loop · the big architecture</span></div>
+<div><b>1 · The project in one picture</b><span>What the robots do · the one-second loop · the big architecture · how to describe it</span></div>
 <div><b>2 · Robotics basics you need</b><span>Grids, cells, coordinates · maps · the robot's body · time</span></div>
 <div><b>3 · The world: generating buildings</b><span>Seven building types · collapse · furniture · rubble · victims · connectivity checks · seeds</span></div>
 <div><b>4 · Sensors</b><span>LiDAR · the RGB-D camera · the thermal camera · what each cannot do</span></div>
 <div><b>5 · Heat: how temperatures are assigned</b><span>Ambient · skin and clothing · rubble blocks heat · warm look-alikes</span></div>
 <div><b>6 · Maps: from measurements to knowledge</b><span>Evidence grids · map vs searched · frontiers · sharing maps</span></div>
-<div><b>7 · Finding people: the machine-learning detector</b><span>Training data · the network · heatmap to position · the belief filter · team verdicts</span></div>
-<div><b>8 · Deciding where to go</b><span>Goals · the decision hierarchy · coverage patterns · team strategies · the auction</span></div>
+<div><b>7 · Finding people: the machine-learning detector</b><span>ML at a glance · training data · the network layer by layer · heatmap to position · the belief filter · team verdicts · hard cases</span></div>
+<div><b>8 · Deciding where to go</b><span>Goals · the decision hierarchy · coverage patterns · team strategies · the auction · a real mission, second by second</span></div>
 <div><b>9 · Route planning</b><span>The grid as a graph · Dijkstra · A* · RRT* · ant colony · comparison</span></div>
 <div><b>10 · Moving and reacting</b><span>Kinematics · teammates · DWA · obstacles · probing · dead ends · revisits</span></div>
 <div><b>11 · Energy and batteries</b><span>The power model · energy-aware tasks · recharging</span></div>
@@ -121,7 +122,7 @@ svg text { font-family: "Segoe UI", Arial, sans-serif; }
 <div><b>13 · Software architecture</b><span>Modules · data flow · the server and the 3-D page · tests</span></div>
 <div><b>14 · How good is it? Measuring</b><span>Metrics · reliability study · algorithm checks</span></div>
 <div><b>15 · Honest limitations</b><span>What is simplified and what a real robot would need</span></div>
-<div><b>16 · Interview questions and answers</b><span>64 questions with answers grounded in this code</span></div>
+<div><b>16 · Interview questions and answers</b><span>74 questions with answers grounded in this code</span></div>
 <div><b>17 · Glossary and formula sheet</b><span>Every term and equation on two pages</span></div>
 </div>
 <div class="box simple" style="margin-top:8mm"><b>How to read this guide</b>

@@ -38,7 +38,7 @@ from .mapping import explore_map, frontiers
 from .metrics import summarize
 from .simulator import Simulator
 from .thermal import SCALE_BELOW, SCALE_TOP, describe_cover, palette, to_unit
-from .world import BUILDINGS, DAMAGE, FLOORS, OBJ_DEBRIS
+from .world import BUILDINGS, DAMAGE, FLOORS, OBJ_DEBRIS, PLAIN_KINDS
 
 WEB = Path(__file__).parent / "web"
 STATIC_DIRS = ("/vendor/", "/js/", "/css/")
@@ -236,7 +236,8 @@ class Session:
                 "reason": r.reason, "zone": r.region, "linked": sim.connected_to_base(r),
                 "goal": None if r.goal is None else {"kind": r.goal.kind,
                                                      "x": sim.world.to_metres(r.goal.cell)[0],
-                                                     "y": sim.world.to_metres(r.goal.cell)[1]},
+                                                     "y": sim.world.to_metres(r.goal.cell)[1],
+                                                     "tag": r.goal.tag, "utility": r.goal.utility},
                 "path": [sim.world.to_metres(c) for c in r.path[:200]],
                 # where the robot has driven (metres; long tracks thinned to at most ~600 points)
                 "track": [sim.world.to_metres(c) for c in r.track[::max(1, len(r.track) // 600)] + r.track[-1:]],
@@ -391,6 +392,21 @@ class Session:
         return buf.getvalue()
 
 
+def _obstacles(q, building: str):
+    """Open test ground: the user's obstacles, "kind,x,y,w,h;..." in cells ("" = none at all, absent = default)."""
+    if building != "plain" or "obstacles" not in q:
+        return None
+    out = []
+    for part in q["obstacles"][0].split(";"):
+        bits = part.split(",")
+        if len(bits) != 5 or bits[0] not in PLAIN_KINDS:
+            continue
+        x, y, w, h = (int(float(b)) for b in bits[1:])
+        if 1 <= w <= 12 and 1 <= h <= 12:
+            out.append((bits[0], x, y, w, h))
+    return tuple(out[:80])
+
+
 def _cfg_from(q, base: RescueConfig) -> RescueConfig:
     g = lambda k, cast, dflt: cast(q[k][0]) if k in q else dflt
     strategy = g("strategy", str, base.strategy)
@@ -427,11 +443,11 @@ def _cfg_from(q, base: RescueConfig) -> RescueConfig:
                    comm_range=0.0, seed=seed,
                    planner=planner, coverage=coverage, avoidance=avoidance,
                    battery_each=each, recharge=g("recharge", str, "1" if base.recharge else "0") == "1",
+                   drain=g("recharge", str, "") == "drain", obstacles=_obstacles(q, building),
                    speed=clamp(g("speed", float, base.speed), 0.2, 1.5),
                    battery_wh=clamp(g("battery", float, base.battery_wh), 0.0, 500.0),
                    camera_range=clamp(g("camrange", float, base.camera_range), 2.0, 8.0),
                    lidar_range=clamp(g("lidarrange", float, base.lidar_range), 3.0, 20.0),
-                   obstacle_density=clamp(g("density", float, base.obstacle_density), 0.0, 3.0),
                    revisit_penalty=clamp(g("revisit", float, base.revisit_penalty), 0.0, 2.0),
                    deadend_recovery=g("deadend", str, "1" if base.deadend_recovery else "0") == "1",
                    run_seed=int(run) if run.lstrip("-").isdigit() else None)

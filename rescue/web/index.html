@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RescueThermal AI · Mission Control</title>
+<title>RescueSim · Multi-Robot Search &amp; Rescue Simulator</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
 <header class="topbar">
   <button class="icon-btn" id="toggleSetup" title="Show or hide the mission setup">⚙<span>Setup</span></button>
   <div class="brand">
-    <b>RescueThermal AI</b>
-    <span>multi-robot search &amp; rescue</span>
+    <b>RescueSim</b>
+    <span>multi-robot search &amp; rescue simulator · LiDAR · RGB-D · thermal</span>
   </div>
   <div class="kpis">
     <div class="kpi"><b id="k-time">0 s</b><span>mission time</span></div>
@@ -44,6 +44,7 @@
         <button class="info" data-hint="hint-building" title="What is this?">i</button>
       </div>
       <p class="hint" id="hint-building"></p>
+      <div id="damageGroup">
       <div class="field">
         <label for="damage">Damage</label>
         <select id="damage">
@@ -54,13 +55,43 @@
         <button class="info" data-hint="hint-damage" title="What is this?">i</button>
       </div>
       <p class="hint" id="hint-damage"></p>
-      <div class="field">
-        <label for="density">Rubble</label>
-        <input type="range" id="density" min="0" max="3" step="0.25" value="1"><output id="densityOut">1×</output>
-        <button class="info" data-hint="hint-density" title="What is this?">i</button>
-      </div>
-      <p class="hint" id="hint-density"></p>
       <button id="newBuilding" class="wide" title="Generate a different random building of this type">New random building</button>
+      </div>
+      <!-- open test ground only: a layout editor for your own obstacles (rescue/web/js/edit.js) -->
+      <div id="plainTools" hidden>
+        <div class="editbar">
+          <button id="obsEdit" class="primary" title="Add or remove obstacles before the mission starts">✎ Edit layout</button>
+          <button id="obsRestart" hidden title="Stop this mission and edit the layout">↻ Restart to edit</button>
+          <div class="seg" id="obsToolSeg">
+            <button data-tool="add" class="on" title="Click free floor to place an obstacle">＋ Add</button>
+            <button data-tool="remove" title="Click an obstacle to delete it">🗑 Remove</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="obsKind">Obstacle</label>
+          <select id="obsKind">
+            <option value="cabinet,1,1">Tall block 0.5 m</option>
+            <option value="cabinet,2,2" selected>Tall block 1 m</option>
+            <option value="cabinet,4,4">Tall block 2 m</option>
+            <option value="shelf,4,1">Wall 2 m, across</option>
+            <option value="shelf,1,4">Wall 2 m, down</option>
+            <option value="shelf,8,1">Wall 4 m, across</option>
+            <option value="shelf,1,8">Wall 4 m, down</option>
+            <option value="crate,1,1">Low crate 0.5 m (under the LiDAR)</option>
+            <option value="crate,2,2">Low crate 1 m (under the LiDAR)</option>
+          </select>
+          <button class="info" data-hint="hint-obstacles" title="What is this?">i</button>
+        </div>
+        <p class="hint" id="hint-obstacles"></p>
+        <div class="obsbtns">
+          <button id="obsUndo" title="Undo the last change">↶ Undo</button>
+          <button id="obsDefault" title="Back to the default obstacles">Default</button>
+          <button id="obsClear" title="Remove every obstacle">Clear all</button>
+        </div>
+        <p class="fine obsnote" id="obsNote"></p>
+        <div class="obshead"><b id="obsCount"></b><span>hover to find · ✕ to remove</span></div>
+        <div class="obslist" id="obsList"></div>
+      </div>
     </section>
 
     <section class="group">
@@ -181,10 +212,11 @@
       <p class="hint" id="hint-battery"></p>
       <div class="battery-each" id="batteryEach" hidden></div>
       <div class="field" id="rechargeRow" hidden>
-        <label>At base</label>
+        <label>When low</label>
         <div class="seg" id="rechargeSeg">
-          <button data-recharge="1" class="on">Recharge</button>
-          <button data-recharge="0">Stay</button>
+          <button data-recharge="1" class="on" title="Go home, recharge, come back">Recharge</button>
+          <button data-recharge="0" title="Go home and stay there">Stay</button>
+          <button data-recharge="drain" title="Never go home: work until the battery is flat and stop there">Run empty</button>
         </div>
         <button class="info" data-hint="hint-recharge" title="What is this?">i</button>
       </div>
@@ -252,11 +284,10 @@
     <!-- instrument read-out for the sensor pictures -->
     <div class="hud" id="hud" hidden></div>
 
-    <!-- bottom left: the selected spot, and how to use the mouse -->
-    <div class="bl">
-      <div class="inspector" id="inspector" hidden>
-        <div class="ihead">
-          <div><b id="inspTitle"></b><span id="inspSub"></span></div>
+    <!-- the selected spot: a card you can drag anywhere over the view -->
+    <div class="inspector" id="inspector" hidden>
+        <div class="ihead" id="inspHandle" title="Drag to move this card">
+          <span class="grip">⠿</span><div><b id="inspTitle"></b><span id="inspSub"></span></div>
           <button class="close" id="inspClose" title="Clear the selection (Esc)">✕</button>
         </div>
         <p id="inspNote"></p>
@@ -265,8 +296,17 @@
           <button id="inspCenter" title="Fly back to the selected spot (F)">⌖ Centre on it</button>
           <button id="inspFollow" title="Ride behind this robot">◎ Follow this robot</button>
         </div>
-        <p class="ihint">Scroll to zoom around this spot · drag to orbit it · Esc to clear</p>
+        <p class="ihint">Drag the card by its title to move it · scroll to zoom · Esc to clear</p>
       </div>
+
+    <!-- layout editor on: what a click does -->
+    <div class="editbanner" id="editBanner" hidden></div>
+
+    <!-- what the team strategy does, drawn on the floor (Layers: strategy) -->
+    <div class="stratcard glass" id="stratCard" hidden></div>
+
+    <!-- bottom left: how to use the mouse -->
+    <div class="bl">
       <div class="navhelp" id="navHelp">
         <span><kbd>Drag</kbd> rotate</span><span><kbd>Right-drag</kbd> move</span><span><kbd>Scroll</kbd> zoom</span>
         <span><kbd>Double-click</kbd> select &amp; zoom there</span>

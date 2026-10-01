@@ -19,6 +19,49 @@ on images rendered by the simulator itself, then wraps its output in a statistic
 <figcaption><b>Figure 7.1</b> From pixels to "victim found". Only the last step says "found"; everything before it produces evidence.</figcaption>
 </figure>
 
+<h2>7.0 Machine learning at a glance</h2>
+<p>If you remember one page of this chapter, make it this one.</p>
+<table>
+<tr><th style="width:30%">Question</th><th>Answer</th></tr>
+<tr><td>Where is ML used?</td><td>In exactly one place: <b>recognising people in camera images</b>. Mapping, exploration, coordination, route planning, motion and batteries are classical, algorithmic robotics.</td></tr>
+<tr><td>Which model?</td><td><b>VictimNet</b>, a small fully convolutional CNN with 72,913 weights (fused version), trained from scratch. It is not YOLO or a pretrained network.</td></tr>
+<tr><td>What goes in?</td><td>One camera frame of 48 × 64 pixels: colour (R, G, B), depth and/or temperature, each scaled to 0–1. <b>The LiDAR is not an input</b>: it maps, it does not recognise.</td></tr>
+<tr><td>What comes out?</td><td>A <b>12 × 16 heatmap</b>: for every 4 × 4-pixel block, the probability that it shows part of a person.</td></tr>
+<tr><td>Where did the training data come from?</td><td>The simulator itself: 20,000 images from 200 random disaster zones, labelled automatically; 4,000 more from 40 unseen zones for testing.</td></tr>
+<tr><td>Why not just a temperature rule?</td><td>A person, a dog and sun-warmed rubble can all read 33 °C. The network uses <b>shape, size, appearance and temperature together</b>; a temperature rule alone would report every dog.</td></tr>
+<tr><td>Does the network decide "victim found"?</td><td><b>No.</b> It produces evidence. Depth turns a detection into a map position, a 40 °C physics check drops heaters and engines, the report is shared with the team, and a Bayesian <b>belief filter</b> decides after repeated, close looks.</td></tr>
+<tr><td>Does ML affect where robots drive?</td><td>Indirectly, yes: an uncertain sighting becomes a <b>verify task</b> worth 30 × its current belief, which competes with frontiers in the auction. A robot drives over for a close look because the network's evidence is not yet conclusive.</td></tr>
+<tr><td>Where does sensor fusion happen?</td><td>Twice. <b>Early fusion</b> in the network: colour, depth and temperature are stacked as 5 input channels. <b>Map fusion</b>: LiDAR and depth-camera evidence are combined in the occupancy grid (chapter 6).</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 760 245" width="760">
+  <g font-size="11">
+  <rect x="10" y="10" width="140" height="52" rx="6" class="d-box"/><text x="80" y="31" text-anchor="middle" class="d-tb">camera frame</text><text x="80" y="49" text-anchor="middle" class="d-ts">RGB · depth · °C (48×64)</text>
+  <rect x="175" y="10" width="140" height="52" rx="6" class="d-warm"/><text x="245" y="31" text-anchor="middle" class="d-tb">VictimNet (ML)</text><text x="245" y="49" text-anchor="middle" class="d-ts">12×16 person heatmap</text>
+  <rect x="340" y="10" width="140" height="52" rx="6" class="d-box"/><text x="410" y="31" text-anchor="middle" class="d-tb">detections</text><text x="410" y="49" text-anchor="middle" class="d-ts">blobs ≥ 0.92, depth → x, y</text>
+  <rect x="505" y="10" width="115" height="52" rx="6" class="d-red"/><text x="562" y="31" text-anchor="middle" class="d-tb">physics check</text><text x="562" y="49" text-anchor="middle" class="d-ts">drop if &gt; 40 °C</text>
+  <rect x="645" y="10" width="110" height="52" rx="6" class="d-violet"/><text x="700" y="31" text-anchor="middle" class="d-tb">report</text><text x="700" y="49" text-anchor="middle" class="d-ts">shared by radio</text>
+  <path d="M150 36H173M315 36H338M480 36H503M620 36H643" class="d-arrow"/>
+  <rect x="470" y="95" width="285" height="58" rx="6" class="d-green"/><text x="612" y="116" text-anchor="middle" class="d-tb">belief filter (team verdict, each second)</text><text x="612" y="134" text-anchor="middle" class="d-ts">evidence ≥ 9, 6 frames, one look ≤ 2.5 m → confirmed</text><text x="612" y="147" text-anchor="middle" class="d-ts">evidence ≤ −1.5 → rejected</text>
+  <path d="M700 62V93" class="d-arrow"/>
+  <rect x="10" y="95" width="420" height="58" rx="6" class="d-grey"/><text x="220" y="116" text-anchor="middle" class="d-tb">still uncertain → verify task (value 30 × belief)</text><text x="220" y="134" text-anchor="middle" class="d-ts">competes in the auction; the winner drives 0.7–2.2 m from it and looks again,</text><text x="220" y="147" text-anchor="middle" class="d-ts">from a new side each time: new frames go back into the network (a loop)</text>
+  <path d="M470 124H432" class="d-arrow"/><path d="M80 95V64" class="d-arrow-b"/>
+  <rect x="470" y="180" width="285" height="52" rx="6" class="d-green"/><text x="612" y="201" text-anchor="middle" class="d-tb">victim map for the rescuers</text><text x="612" y="219" text-anchor="middle" class="d-ts">position, temperature, how many robots saw it</text>
+  <path d="M612 153V178" class="d-arrow"/>
+  <text x="10" y="192" class="d-ts">ML (orange) turns pixels into evidence.</text>
+  <text x="10" y="208" class="d-ts">Classical parts (blue, red, green) turn evidence into positions,</text>
+  <text x="10" y="224" class="d-ts">verdicts and decisions about where to drive.</text>
+  </g>
+</svg>
+<figcaption><b>Figure 7.0</b> The whole ML pipeline, including the loop back: an uncertain sighting sends a robot for a closer look, and the new images go through the network again.</figcaption>
+</figure>
+
+<div class="box tip"><b>Interview tip: the one-sentence answer</b>
+<p>"I trained a CNN-based victim detector on simulated colour, depth and thermal images. It outputs a heatmap of where a person might be; depth places each detection on the map, a
+physics check removes objects hotter than a person, and a Bayesian belief filter, shared by the whole team, combines repeated close looks before anything is reported as a
+confirmed victim. So I'd describe the project as robotics plus computer vision plus sensor fusion plus multi-robot autonomy, not as 'an ML project'."</p></div>
+
 <h2>7.1 Three detectors, one network</h2>
 <p>The same network architecture is trained three times, once per sensor set on the dashboard. The only difference is what it is given as input:</p>
 <table>

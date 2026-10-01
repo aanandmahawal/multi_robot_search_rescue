@@ -134,7 +134,8 @@ def test_robots_drive_their_pattern_on_the_test_ground(pattern):
         assert sw.done and sw.end_t is not None
         assert sw.reached + len(sw.skipped) == len(sw.cells)
         assert all(why == "inside an obstacle" for _, why in sw.skipped)       # nothing else is ever skipped here
-        assert len(sw.skipped) <= 3
+        assert len(sw.skipped) <= 5
+        assert all(sim.world.blocked[sw.cells[i][1], sw.cells[i][0]] for i, _ in sw.skipped)   # really on a block or a body
         # every waypoint reached was really driven through
         driven = set(r.track)
         skipped = {i for i, _ in sw.skipped}
@@ -309,3 +310,34 @@ def test_a_battery_too_small_for_any_task_ends_the_mission_cleanly():
     assert sim.t < 400 and all(r.state == "done" and not r.depleted for r in sim.robots)
     assert all(r.charges <= 2 for r in sim.robots)                               # no endless docking
     assert any("cannot reach" in e for _, e in sim.events) or any("even a full" in r.finished_reason for r in sim.robots)
+
+
+def test_run_until_empty_never_turns_home_and_stops_where_the_battery_dies():
+    sim = Simulator(replace(CFG, building="plain", n_robots=2, battery_wh=1.0, drain=True)).run()
+    assert all(r.depleted and r.state == "done" for r in sim.robots)          # both ran flat...
+    assert all(r.cell not in sim.world.starts for r in sim.robots)           # ...out in the hall, not at the base
+    assert all(r.charges == 0 and not r.low_battery for r in sim.robots)
+    assert not any("returns to base" in e for _, e in sim.events)
+
+
+# ------------------------------------------------------------------ open test ground
+def test_your_own_obstacles_on_the_test_ground():
+    from rescue.world import generate
+    own = (("cabinet", 20, 10, 2, 2), ("crate", 30, 25, 1, 1), ("shelf", 4, 18, 1, 4))   # the shelf would block the entrance
+    w = generate(replace(CFG, building="plain", obstacles=own))
+    assert [(f.kind, f.x0, f.y0) for f in w.furniture] == [("cabinet", 20, 10), ("crate", 30, 25)]
+    assert w.blocked[25, 30] and w.nav_height[25, 30] < 0.4                  # a low crate: under the LiDAR's scan plane
+    assert not generate(replace(CFG, building="plain", obstacles=())).furniture
+    assert all(v.cover == "none" for v in w.victims)                          # the test ground is undamaged
+
+
+def test_editing_the_test_ground_does_not_move_the_victims():
+    from rescue.world import generate
+    plain = replace(CFG, building="plain")
+    w = generate(plain)
+    layout = tuple((f.kind, f.x0, f.y0, f.w, f.h) for f in w.furniture)                    # the default layout, as the editor sends it
+    before = [(v.x, v.y) for v in w.victims]
+    for extra in [("crate", 30, 30, 1, 1), ("cabinet", 40, 10, 2, 2)]:
+        if any(extra[1] <= x / CFG.cell < extra[1] + extra[3] + 1 and extra[2] <= y / CFG.cell < extra[2] + extra[4] + 1 for x, y in before):
+            continue                                                          # a block on a victim does move that victim
+        assert [(v.x, v.y) for v in generate(replace(plain, obstacles=layout + (extra,))).victims] == before

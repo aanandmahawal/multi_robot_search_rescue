@@ -48,7 +48,7 @@ are people, each with its measured temperature and how many robots saw it, and e
 </table>
 <p>Partition and the auction are clearly better than greedy and far better than random. Partition drives least, because zones never overlap. The auction is as fast to find
 everyone and keeps working when zones are unequal. With perfect eyes all four strategies eventually find 100 % of detectable victims except random (86 %).</p>
-<p class="small">These benchmark tables in the README were measured before the confirmation-rule change; the navigation comparison (perfect eyes) is not affected by it.</p>
+<p class="small">Source: <code>results/vision/benchmark.md</code> (<code>python -m rescue benchmark</code>). It was measured before the confirmation-rule change, which does not affect this perfect-eyes navigation comparison.</p>
 
 <h2>14.4 Navigation checks on the test ground</h2>
 <p><code>scripts/check_algorithms.py</code> verifies the algorithms against known answers (chapter 9 has the planner table): all four planners return valid routes, Dijkstra and A* are exactly

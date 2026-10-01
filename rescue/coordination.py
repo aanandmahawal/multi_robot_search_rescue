@@ -58,6 +58,8 @@ class Goal:
     reason: str = ""
     path: list | None = None      # precomputed path (transit goals plan through unexplored space)
     waypoint: int | None = None   # sweep goals: index of the waypoint in the robot's coverage pattern
+    tag: str = ""                 # short label of why this goal won, drawn in the 3-D view (strategy layer)
+    utility: float | None = None  # coordinated: the winning bid
 
 
 def _pieces(cells: np.ndarray) -> list[np.ndarray]:
@@ -156,7 +158,8 @@ def next_waypoint(sim: "Simulator", r: "RobotAgent") -> Goal | None:
             if not sim.affordable(r, c, d, work_s=0.0):
                 r.unaffordable += 1                    # keep the waypoint: recharge first, then continue from here
                 return None
-            return Goal("sweep", c, 0.0, d, waypoint=sw.index, reason=f"following {sw.where()}, {d:.1f} m away")
+            return Goal("sweep", c, 0.0, d, waypoint=sw.index, reason=f"following {sw.where()}, {d:.1f} m away",
+                        tag=f"{'spiral' if sw.pattern == 'spiral' else 'lane'} wp {sw.index + 1}/{len(sw.cells)}")
         sw.skipped.append((sw.index, why))
         sw.index += 1
     return None
@@ -175,6 +178,7 @@ def _sweep(sim, deciding, options) -> dict[int, Goal]:
                 and all(np.hypot(g.look_at[0] - a[0], g.look_at[1] - a[1]) >= 1.3 for a in checking)]
         if near:
             g = min(near, key=lambda g: g.distance)
+            g.tag = "check sighting"
             out[r.id] = _describe(g, f"a sighting within {VERIFY_DETOUR:g} m of my {r.sweep.pattern_name}: "
                                      f"checking it, then continuing with {r.sweep.where()}")
             continue
@@ -215,12 +219,16 @@ def _choose_frontier(sim: "Simulator", deciding: list["RobotAgent"], options: di
     if strategy == "random":
         for r in deciding:
             opts = options[r.id]
-            out[r.id] = _describe(opts[int(sim.rng.integers(len(opts)))],
-                                  f"picked at random from {len(opts)} goals", sim) if opts else None
+            g = opts[int(sim.rng.integers(len(opts)))] if opts else None
+            if g is not None:
+                g.tag = f"random (1 of {len(opts)})"
+            out[r.id] = _describe(g, f"picked at random from {len(opts)} goals", sim) if g else None
         return out
     if strategy == "greedy":
         for r in deciding:
             g = min(options[r.id], key=lambda g: (g.distance + sim.tie_break(), -g.value), default=None)
+            if g is not None:
+                g.tag = f"nearest · {g.distance:.1f} m"
             out[r.id] = _describe(g, "nearest goal (teammates ignored)", sim) if g else None
         return out
     if strategy == "partition":
@@ -241,6 +249,7 @@ def _partition(sim, deciding, options) -> dict[int, Goal | None]:
         mine = [g for g in options[r.id] if sim.region[g.cell[1], g.cell[0]] == zone]
         if mine:
             g = min(mine, key=lambda g: (g.distance, -g.value))
+            g.tag = f"zone Z{zone} · {g.distance:.1f} m"
             out[r.id] = _describe(g, f"nearest goal inside my zone Z{zone}", sim)
             continue
         # nothing reachable in my zone on my map: is there still unsearched space in it?
@@ -255,7 +264,7 @@ def _partition(sim, deciding, options) -> dict[int, Goal | None]:
         cell = (int(xs[k]), int(ys[k]))
         g = Goal("transit", cell, 0.0, float(dist[ys[k], xs[k]]) * sim.cfg.cell,
                  reason=f"driving to my zone Z{zone} ({float(dist[ys[k], xs[k]]) * sim.cfg.cell:.1f} m), "
-                        f"only passing through other zones")
+                        f"only passing through other zones", tag=f"to zone Z{zone}")
         g.path = extract_path(parent, r.cell, cell)
         out[r.id] = g
     return out
@@ -307,10 +316,12 @@ def _auction(sim, deciding, options) -> dict[int, Goal | None]:
                     near = min((np.hypot(c.cell[0] - g.cell[0], c.cell[1] - g.cell[1]) for c, _ in claimed), default=99)
                     return near * cfg.cell - 0.2 * g.distance
                 g = max(fr, key=spread)
+                g.tag = "spread out"
                 result[r.id] = _describe(g, "every goal is taken, so going where I overlap least with teammates", sim)
                 claimed.append((g, r))
             break
         u, r, g, v, note = best
+        g.tag, g.utility = f"bid {u:.1f} = {v:.1f} − 0.5×{g.distance:.1f}", float(u)
         result[r.id] = _describe(g, f"won the auction, utility {u:.1f} = value {v:.1f} - 0.5 x {g.distance:.1f} m{note}", sim)
         claimed.append((g, r))
         pending.remove(r)

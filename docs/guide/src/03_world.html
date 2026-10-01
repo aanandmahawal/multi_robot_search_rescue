@@ -96,8 +96,13 @@ by segment. The world object (<code>World</code>) holds <code>blocked</code>, <c
 <h2>3.2 The open test ground</h2>
 <p>The test ground (building <i>plain</i>) is deliberately <b>not random</b>. It is one empty hall with a 2 × 2 m block in the centre, two crates on the diagonal,
 1.5 m cabinets in all four corners, shelves along the top and bottom walls and counters on the side walls, plus a faint painted 2 m grid. It has no collapse,
-rubble, look-alikes or warm objects. Only the victims change with the seed. That makes it the right place to check that a lawnmower really drives
+rubble, look-alikes, warm objects or buried victims. Only the victims' positions change with the seed. That makes it the right place to check that a lawnmower really drives
 straight lanes, or that A* really finds the same route length as Dijkstra.</p>
+<p>On the dashboard you can also <b>place your own obstacles</b> on the test ground: tall blocks and walls, or a 30 cm <b>low crate</b>. The crate lies under the LiDAR's 40 cm scan
+plane and the camera looks over it, so the robots only notice it with the depth camera close up or with the bumper. That is a good way to watch replanning and the
+bumper at work. The same "cuts nothing off" test protects your layout: an obstacle that would seal off part of the ground is refused. On the test ground each victim
+gets its own random generator (seed + victim number), so adding or removing an obstacle does not shuffle the victims: you compare layouts with the same people to find.
+The layout can only be edited before a mission starts.</p>
 
 <div class="box tip"><b>Interview tip: "how do you guarantee every area can be searched?"</b>
 <p>"Every object is placed tentatively and accepted only if a flood fill from the entrance shows that the reachable area shrank by exactly the object's own

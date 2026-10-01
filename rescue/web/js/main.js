@@ -4,6 +4,7 @@
 //   loading -> ready (waits for Start) -> running <-> paused -> finished
 import { api, REQUEST_MS } from "./api.js";
 import { initControls, missionParams, setLayer, syncTransport, syncViewAs } from "./controls.js";
+import { afterWorld, initEditor, syncEditor } from "./edit.js";
 import { clearSelection, initInspector, refreshInspector } from "./inspect.js";
 import { initPanels, resetPanels, selectRobot, setOnSelect, showTab, updatePanels } from "./panels.js";
 import { camera, initScene, lookAt, refit, renderer, setView } from "./scene.js";
@@ -12,7 +13,11 @@ import { $, sleep } from "./util.js";
 import { availableView, buildWorld, initWorld, renderLegend, updateWorld } from "./world3d.js";
 
 function showError(msg) { $("error").hidden = !msg; $("error").textContent = msg || ""; }
-function setPhase(p) { store.phase = p; syncTransport(); }
+function setPhase(p) {
+  store.phase = p;
+  if (p !== "ready") store.editObstacles = false;     // the layout can only be edited before a mission starts
+  syncTransport(); syncEditor();
+}
 async function whenIdle() { while (store.busy) await sleep(20); }
 
 // one request to the server at a time
@@ -31,7 +36,7 @@ async function newMission({ start = false } = {}) {
   const ok = await withServer(async () => {
     const j = await api.reset(missionParams());
     Object.assign(store, { world: j.world, state: j.state, prevState: null, lastAt: performance.now() });
-    clearSelection(); buildWorld(); redraw(); resetPanels(); updatePanels(true);
+    afterWorld(); clearSelection(); buildWorld(); redraw(); resetPanels(); updatePanels(true);
   });
   setPhase(!ok ? "ready" : start ? "running" : "ready");
 }
@@ -87,6 +92,7 @@ async function tick() {
 initScene($("view"));
 initWorld();
 initInspector();
+initEditor(() => newMission());
 initPanels({ onReveal: reveal });
 initControls({
   onNewMission: () => newMission(),

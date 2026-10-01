@@ -1,7 +1,7 @@
 """Build the project guide PDF: stitch the chapters in src/ together and print them with Edge/Chrome.
 
     python docs/guide/make_figures.py     # (re)compute the figures, once
-    python docs/guide/build.py            # -> docs/RescueThermal_AI_Guide.pdf
+    python docs/guide/build.py            # -> docs/RescueSim_Guide.pdf
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 OUT_HTML = HERE / "guide.html"
-OUT_PDF = HERE.parent / "RescueThermal_AI_Guide.pdf"
+OUT_PDF = HERE.parent / "RescueSim_Guide.pdf"
 BROWSERS = [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",

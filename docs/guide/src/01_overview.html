@@ -3,7 +3,7 @@
 ground robots enters through one door. They have to map the building, search every reachable corner with their
 cameras, recognise the people, and report where they are, without crashing into each other or running out of battery.</p>
 
-<p><b>RescueThermal AI</b> simulates exactly that mission. It is a complete, working system:</p>
+<p><b>RescueSim</b> (multi-robot search &amp; rescue simulator) simulates exactly that mission. It is a complete, working system:</p>
 <ul>
 <li>a <b>world generator</b> that builds a new damaged building every time (office, apartments, hospital, school, parking garage,
 warehouse, or an open test ground), with furniture, rubble, hidden victims and objects that look like people;</li>
@@ -122,3 +122,25 @@ rescuers wait). The dashboard shows each robot's current goal, its reason in pla
 <tr><td>Things that look like people</td><td>12 look-alikes (jackets, bags...) + 6 warm objects (dogs, heaters...)</td><td><code>n_decoys, n_warm_objects</code></td></tr>
 <tr><td>Driving speed</td><td>0.5 m/s, turning 180°/s</td><td><code>speed, turn_rate</code></td></tr>
 </table>
+
+<h2>1.4 How to describe this project</h2>
+<p>People will ask "what kind of project is it?" It is not "an ML project" and not "a path-planning project". It combines several fields, each in a specific place:</p>
+<table>
+<tr><th style="width:24%">Field</th><th>Where it appears in this project</th><th style="width:12%">Chapters</th></tr>
+<tr><td><b>Mobile robotics</b></td><td>occupancy mapping, frontier exploration, coverage patterns, kinematics, obstacle handling, dead-end recovery</td><td>2, 6, 8, 10</td></tr>
+<tr><td><b>Computer vision / deep learning</b></td><td>a CNN trained from scratch on 20,000 simulated images to find people in colour, depth and thermal frames</td><td>7</td></tr>
+<tr><td><b>Sensor fusion</b></td><td>colour + depth + temperature stacked into one network (early fusion); LiDAR + depth camera + bumper combined in one evidence grid</td><td>6, 7</td></tr>
+<tr><td><b>Probabilistic reasoning</b></td><td>log-odds evidence for map cells and for victim sightings, team verdicts</td><td>6, 7</td></tr>
+<tr><td><b>Multi-robot systems</b></td><td>map and report sharing, auction-based task allocation, zone partitioning, conflict-free motion</td><td>6, 8, 10</td></tr>
+<tr><td><b>Algorithms</b></td><td>Dijkstra, A*, RRT*, ant colony, Hungarian assignment, flood fill, Bresenham, SVD</td><td>3, 8, 9</td></tr>
+<tr><td><b>Simulation and physics</b></td><td>procedural buildings, ray-cast sensors, heat transfer through rubble, an energy model</td><td>3, 4, 5, 11</td></tr>
+<tr><td><b>Software engineering</b></td><td>a layered package, a web dashboard, 94 tests, reproducible experiments with held-out evaluation</td><td>13, 14</td></tr>
+</table>
+
+<div class="box tip"><b>Interview tip: the two-minute version</b>
+<p>"RescueSim simulates a team of ground robots searching a collapsed building for people. Each robot has a LiDAR, a colour-and-depth camera and a thermal camera. The LiDAR and
+depth camera build a probabilistic occupancy map, which the team shares by radio. To find people, I trained a small CNN on simulated images. It outputs a heatmap, depth places detections
+on the map, and a Bayesian filter confirms a person only after repeated close looks, so a dog at 33 °C isn't reported as a victim. The robots decide where to go in layers: a coverage
+pattern (frontier, lawnmower or spiral) says where to search next, an auction decides which robot takes which task, and Dijkstra, A*, RRT* or an ant colony plans the route. They replan
+around new obstacles, recover from dead ends and manage their batteries. Everything is measured against ground truth: with both cameras the team finds 100 of 102 findable victims at
+88 % precision."</p></div>
